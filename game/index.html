@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SOLMARA — an open-world crime game</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #14101f; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .hidden { display: none !important; }
+  .panel { position: fixed; color: #eef1f5; text-shadow: 0 1px 4px rgba(0,0,0,0.8); z-index: 5; }
+  #hud-top-left { top: 14px; left: 16px; }
+  #hud-cash { font-size: 30px; font-weight: 800; color: #ffd24d; letter-spacing: 0.5px; }
+  #hud-health-wrap { width: 170px; height: 10px; background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.35); border-radius: 5px; margin-top: 6px; overflow: hidden; }
+  .health { display: block; height: 100%; background: linear-gradient(90deg, #37d67a, #7dff5a); width: 100%; }
+  .health.low { background: linear-gradient(90deg, #e5534b, #ff8a5a); }
+  #hud-health-label { font-size: 11px; letter-spacing: 2px; color: #cfd6e4; margin-top: 3px; }
+  #hud-top-right { top: 14px; right: 16px; text-align: right; }
+  #hud-wanted { font-size: 26px; color: #ffd24d; letter-spacing: 3px; }
+  #hud-wanted-label { font-size: 12px; letter-spacing: 3px; color: #cfd6e4; }
+  #hud-mission { top: 14px; left: 50%; transform: translateX(-50%); text-align: center; max-width: 560px; }
+  #hud-mission-title { font-size: 19px; font-weight: 800; color: #ffd24d; letter-spacing: 1px; }
+  #hud-mission-brief { font-size: 14px; color: #e8ecf4; margin-top: 2px; }
+  #hud-hint { margin-top: 6px; font-size: 14px; font-weight: 700; color: #ff8a5a; }
+  #hud-feed { top: 96px; right: 16px; width: 280px; font-size: 12.5px; }
+  #hud-feed .post { background: rgba(10, 10, 20, 0.62); border-left: 3px solid #ff2e88; border-radius: 4px; padding: 7px 9px; margin-bottom: 6px; }
+  #hud-feed .post b { color: #7dd8ff; display: block; margin-bottom: 1px; }
+  #hud-feed .post span { color: #dfe4ee; }
+  #hud-bottom-left { bottom: 14px; left: 16px; }
+  #minimap { width: 176px; height: 176px; border: 2px solid rgba(255, 210, 77, 0.7); border-radius: 6px; background: rgba(10, 12, 20, 0.85); }
+  #hud-bottom-right { bottom: 14px; right: 16px; text-align: right; font-size: 13px; color: #e8ecf4; }
+  #hud-radio { font-weight: 800; color: #ff5ad8; letter-spacing: 1px; }
+  #hud-speed { font-size: 22px; font-weight: 800; color: #fff; margin-top: 2px; }
+  #hud-prompt { bottom: 16px; left: 50%; transform: translateX(-50%); font-size: 14px; color: #fff; background: rgba(10, 10, 20, 0.6); padding: 7px 14px; border-radius: 20px; white-space: nowrap; }
+  .overlay { position: fixed; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center; }
+  .overlay-card { text-align: center; color: #eef1f5; max-width: 760px; padding: 28px 36px; background: rgba(8, 6, 18, 0.55); border: 1px solid rgba(255, 46, 136, 0.45); border-radius: 16px; backdrop-filter: blur(2px); }
+  .game-title { font-size: 84px; font-weight: 900; letter-spacing: 10px; margin: 0; line-height: 1; background: linear-gradient(180deg, #ffd24d 10%, #ff2e88 55%, #7a3aff 100%); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 4px 18px rgba(255, 46, 136, 0.55)); }
+  .tagline { font-size: 20px; font-weight: 700; color: #ffe14d; margin: 10px 0 4px; letter-spacing: 1px; }
+  .hook { font-size: 16px; color: #e8ecf4; line-height: 1.55; margin: 10px 0; }
+  .hook b { color: #7dd8ff; }
+  .contract-badge { display: inline-block; font-size: 13px; font-weight: 800; letter-spacing: 2px; color: #0a0a12; background: linear-gradient(90deg, #ffd24d, #ff9a3c); padding: 6px 14px; border-radius: 20px; margin: 6px 0 2px; }
+  .controls { font-size: 13.5px; color: #cfd6e4; line-height: 1.7; margin: 12px 0 4px; }
+  .controls b { color: #fff; }
+  .start-prompt { font-size: 21px; font-weight: 800; color: #ffd24d; margin-top: 14px; animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+  #continue-line { font-size: 14px; color: #7dff5a; margin-top: 8px; }
+  .big-word { font-size: 64px; font-weight: 900; letter-spacing: 6px; margin: 0 0 8px; }
+  #busted-screen .big-word { color: #ff2e4d; text-shadow: 0 0 26px rgba(255, 46, 77, 0.7); }
+  #paused-screen .big-word { color: #eef1f5; }
+  .sub { font-size: 16px; color: #dfe4ee; line-height: 1.5; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.min.js" } }
+</script>
+</head>
+<body>
+<canvas id="game" aria-label="Solmara: a 3D open-world crime game. Walk and drive around a neon coastal city, steal cars, dodge the police and run missions."></canvas>
+<p id="status" role="status" aria-live="polite"></p>
+
+<div id="hud-top-left" class="panel"><div id="hud-cash">$60</div><div id="hud-health-wrap"><span id="hud-health-bar" class="health"></span></div><div id="hud-health-label">HEALTH</div></div>
+<div id="hud-top-right" class="panel"><div id="hud-wanted">☆☆☆☆☆</div><div id="hud-wanted-label">CLEAN</div></div>
+<div id="hud-mission" class="panel"><div id="hud-mission-title">Chapter 1 — New in Town</div><div id="hud-mission-brief">Walk to Mara&rsquo;s Garage.</div><div id="hud-hint"></div></div>
+<div id="hud-feed" class="panel"></div>
+<div id="hud-bottom-left" class="panel"><canvas id="minimap" width="176" height="176"></canvas></div>
+<div id="hud-bottom-right" class="panel"><div id="hud-radio">DANGDUT PANTURA</div><div id="hud-speed"></div><div>Drag mouse to look &middot; Scroll to zoom</div></div>
+<div id="hud-prompt" class="panel"></div>
+
+<div id="title-screen" class="overlay">
+  <div class="overlay-card">
+    <h1 class="game-title">SOLMARA</h1>
+    <div class="tagline">A NEON COASTAL CITY THAT NEVER SLEEPS — AND NEVER FORGIVES.</div>
+    <p class="hook">You are new in town with <b>$60</b>, a borrowed jacket and a name nobody knows yet.
+    <b>Mara Voss</b> is waiting at the garage with a job that could make you — or bury you.
+    Steal cars. Outrun the cops. Find the <b>Golden Token</b>. Sign the <b>10-Day Contract</b> and
+    take the city for yourself.</p>
+    <div class="contract-badge">★ THE 10-DAY CONTRACT — 7 CHAPTERS — ONE BIG SCORE ★</div>
+    <p class="controls"><b>WASD</b> move / drive &nbsp;·&nbsp; <b>Shift</b> run &nbsp;·&nbsp; <b>E</b> steal &amp; exit car &nbsp;·&nbsp; <b>Space</b> punch &nbsp;·&nbsp; <b>F</b> dance &nbsp;·&nbsp; <b>R</b> radio &nbsp;·&nbsp; <b>P</b> pause<br>
+    Steal a car, follow the gold beacon, and watch the stars — five of them means the whole city is coming for you.</p>
+    <div class="start-prompt">PRESS ENTER TO START</div>
+    <div id="continue-line" class="hidden"></div>
+  </div>
+</div>
+
+<div id="paused-screen" class="overlay hidden">
+  <div class="overlay-card">
+    <h1 class="big-word">PAUSED</h1>
+    <p class="sub">Solmara waits for no one. Except right now.</p>
+    <div class="start-prompt">PRESS P TO RESUME</div>
+  </div>
+</div>
+
+<div id="busted-screen" class="overlay hidden">
+  <div class="overlay-card">
+    <h1 class="big-word">BUSTED</h1>
+    <p class="sub">You&rsquo;re Under Arrest. The cops got you — but the dance was flawless.<br>
+    You lose 10% of your cash. Mara already has the next job ready.</p>
+    <div class="start-prompt">PRESS ENTER TO GET BACK ON THE STREET</div>
+  </div>
+</div>
+
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
