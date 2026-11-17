@@ -333,6 +333,18 @@ export function createCity(canvas, state, getMissionTarget) {
     scene.add(mesh);
   }
 
+  // One more board, added in the fix round: the dangdut station's own sign
+  // on the far south-west block, so the radio has a home in the city.
+  {
+    const tex = signTexture('DANGDUT PANTURA', '#ff9a3c');
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(44, 7),
+      new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }),
+    );
+    mesh.position.set(-180, 16, 128);
+    scene.add(mesh);
+  }
+
   // Golden Token: spinning gold torus with a glow sprite.
   const tokenGroup = new THREE.Group();
   const tokenMesh = new THREE.Mesh(

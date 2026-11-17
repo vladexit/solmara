@@ -8,6 +8,26 @@ SOLMARA is a complete open-world crime game that runs in the browser: a neon coa
 
 Built in proper 3D with Three.js (vendored 0.160.0, fully offline): a dusk city with lit-window buildings, roads, lamps, palms, 3D cars and pedestrians, a third-person chase camera, and a cinematic title flyover — plus a HUD and minimap, localStorage saves, combat, and original WebAudio radio with 4 stations including dangdut.
 
+## Controls
+
+| Key | Action |
+| --- | --- |
+| WASD / arrows | Move on foot, drive in a car |
+| Shift | Run |
+| E | Steal a car / get out of a car |
+| Space | Punch |
+| F | Dance (the Under Arrest dance when busted) |
+| R | Change radio station — also works on the title screen |
+| M | Mute |
+| C | Continue a saved game |
+| P / Esc | Pause |
+
+Drag the mouse to look around, scroll to zoom the camera.
+
+## Screenshots
+
+Real in-game renders from the deterministic `?shot=` scenes (seed 1): the cinematic title flyover (`1-start.jpg`), driving the 10-Day Contract (`2-play.jpg`), a three-star police chase (`3-chase.jpg`), and the Under Arrest dance after getting busted (`4-busted.jpg`).
+
 ## Run it
 
 ```sh

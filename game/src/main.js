@@ -127,7 +127,7 @@ function runGame() {
     } else {
       cont.classList.add('hidden');
     }
-    announce('Solmara. Press Enter to start.');
+    announce('Solmara. Press Enter to start. R changes the radio station.');
   }
 
   function handleActions() {
@@ -136,7 +136,11 @@ function runGame() {
     if (actions & ACTION_MUTE) audio.toggleMute();
     if (actions & ACTION_RADIO) audio.nextStation();
     if (screen === SCREEN_TITLE) {
-      if (actions & ACTION_CONTINUE && save) startGame(true);
+      if (actions & ACTION_RADIO) {
+        // The station already advanced above; just name it, so the player
+        // can pick a station to start with before pressing Enter.
+        announce(`Radio: ${audio.stationName()}. Press Enter to start.`);
+      } else if (actions & ACTION_CONTINUE && save) startGame(true);
       else if (actions & ACTION_CONFIRM) startGame(false);
     } else if (screen === SCREEN_PLAY) {
       if (actions & ACTION_PAUSE) {
