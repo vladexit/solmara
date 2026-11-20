@@ -6,7 +6,23 @@
 // cars three silhouettes, added timed deliveries, a ram-the-convoy objective,
 // road-grid police pursuit with roadblocks at wanted 3+, a win screen with
 // stats, a loading screen and a fuller pause menu — and restaged the play
-// screenshot in the busiest part of town.
+// screenshot in the busiest part of town. The round-3 re-record then added
+// four side systems on top of all that: street races on Neon Row (race.js),
+// Mara's Garage upgrade shop (garage.js), a day/night cycle with rain fronts
+// and lightning (weather.js), and taxi fares (taxi.js) — each wired into the
+// world, the HUD, the minimap, the 3D city and the save, with three new
+// screenshot scenes (?shot=race|taxi|garage) to show them. A fifth side
+// system, daily challenges (challenges.js), deals three rotating cash goals
+// — ram cars, drive taxi, win races, hold cash, throw punches — and pays out
+// the moment one is done. A sixth, achievements (achievements.js), tracks ten
+// one-time badges — first race win, first fare, a grand in the pocket, the
+// Golden Token, ten rams, ten punches, five stolen cars, three chapters,
+// three challenges, a garage purchase — each posting to the feed on unlock.
+// And Mara sells nitro: three charges a can, N in a car for a three-second burst.
+// A seventh side system, hidden packages (packages.js), stashes 50 parcels
+// around the city — grab one within three metres, follow the minimap dot and
+// the HUD compass, and milestones pay $150 at 10, $400 at 25 and $1,000 at 50,
+// with the hunt saved across sessions. It has its own scene (?shot=packages).
 // A working gta6-01 entry (Node 22, standard library only): the game is this directory's
 // game/ folder, plain static files a desktop browser loads offline (game/index.html and its ES
 // modules, no library and no network request), and the program hands it in. It copies game/ and

@@ -75,5 +75,11 @@ createServer((request, response) => {
     ['2-play.jpg', '?shot=play&seed=1'],
     ['3-chase.jpg', '?shot=chase&seed=1'],
     ['4-busted.jpg', '?shot=busted&seed=1'],
+    // Round-3 side systems: a race mid-flight, a taxi fare and Mara's shop.
+    ['5-race.jpg', '?shot=race&seed=1'],
+    ['6-taxi.jpg', '?shot=taxi&seed=1'],
+    ['7-garage.jpg', '?shot=garage&seed=1'],
+    // A hidden-package pickup, staged beside the first parcel.
+    ['8-packages.jpg', '?shot=packages&seed=1'],
   ]) console.log(`  ${name}  http://localhost:${port}/${query}`);
 });

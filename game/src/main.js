@@ -5,12 +5,12 @@
 // ?seed=N fixes the city. ?shot=start|play|chase|busted (with &seed=N) stages
 // that scene instead of running the loop, paints it twice and sets
 // window.__shotReady for a screenshot.
-import { SAVE_KEY, STEP } from './config.js';
+import { SAVE_KEY, STEP, TAXI_BASE_FARE, TAXI_PER_METER } from './config.js';
 import { createRandom } from './random.js';
-import { createWorld, EVENT_BUSTED, EVENT_CASH, EVENT_CRASH, EVENT_MISSION, EVENT_MISSION_FAIL, EVENT_PUNCH, EVENT_RAM, EVENT_TOKEN, EVENT_WIN } from './world.js';
+import { createWorld, EVENT_ACHIEVEMENT, EVENT_BUSTED, EVENT_CASH, EVENT_CHALLENGE, EVENT_CRASH, EVENT_MISSION, EVENT_MISSION_FAIL, EVENT_NITRO, EVENT_PACKAGE, EVENT_PUNCH, EVENT_RACE_COUNT, EVENT_RACE_DONE, EVENT_RAM, EVENT_TAXI_DROPOFF, EVENT_TAXI_PICKUP, EVENT_THUNDER, EVENT_TOKEN, EVENT_WIN } from './world.js';
 import {
-  ACTION_CONFIRM, ACTION_CONTINUE, ACTION_DANCE, ACTION_ENTER, ACTION_HORN, ACTION_MUTE,
-  ACTION_PAUSE, ACTION_PUNCH, ACTION_RADIO, createInput,
+  ACTION_CONFIRM, ACTION_CONTINUE, ACTION_DANCE, ACTION_ENTER, ACTION_GARAGE, ACTION_HORN, ACTION_MUTE,
+  ACTION_NITRO, ACTION_PAUSE, ACTION_PUNCH, ACTION_RADIO, createInput,
 } from './input.js';
 import { createCity } from './city.js';
 import { createAudio } from './audio.js';
@@ -27,7 +27,15 @@ const seed = Number.isInteger(seedParam) ? seedParam : Math.floor(Math.random() 
 const canvas = document.getElementById('game');
 const status = document.getElementById('status');
 const world = createWorld(createRandom(seed));
-const city = createCity(canvas, world.state, () => world.missionTarget());
+// Taxi work takes the beacon while a fare is live: cyan to the waiting
+// passenger, green to the drop-off. Otherwise the mission marker leads.
+const city = createCity(canvas, world.state, () => {
+  const taxiTarget = world.taxi.target();
+  if (taxiTarget && !world.state.won) {
+    return { x: taxiTarget.x, z: taxiTarget.z, color: taxiTarget.kind === 'pickup' ? 0x2dd4ff : 0x7dff5a };
+  }
+  return world.missionTarget();
+});
 const audio = createAudio();
 const hud = createHud({
   cash: document.getElementById('hud-cash'),
@@ -43,6 +51,13 @@ const hud = createHud({
   prompt: document.getElementById('hud-prompt'),
   feed: document.getElementById('hud-feed'),
   minimap: document.getElementById('minimap'),
+  weatherLine: document.getElementById('hud-weather'),
+  raceLine: document.getElementById('hud-race'),
+  taxiLine: document.getElementById('hud-taxi'),
+  challengeLine: document.getElementById('hud-challenge'),
+  achievementLine: document.getElementById('hud-achievements'),
+  packageLine: document.getElementById('hud-packages'),
+  garageOverlay: document.getElementById('garage-screen'),
   titleOverlay: document.getElementById('title-screen'),
   pausedOverlay: document.getElementById('paused-screen'),
   bustedOverlay: document.getElementById('busted-screen'),
@@ -65,6 +80,12 @@ function writeSave() {
       cash: world.state.cash,
       missionIndex: world.state.missionIndex,
       tokenTaken: world.state.token.taken,
+      // Garage upgrades persist: paint, tunes, armor and neon come back
+      // with the next car the player steals.
+      garage: world.garage.saveData(),
+      // The package hunt persists: found parcels stay found, and paid
+      // milestones never pay twice.
+      packages: world.packages.saveData(),
     }));
   } catch {
     // Storage can be off (private windows): the save then lasts this visit only.
@@ -85,6 +106,37 @@ function missionObjective() {
   return '';
 }
 
+// The race line: the countdown, the live position and lap time, the result,
+// or the career record once the player has won one.
+function raceLine() {
+  const r = world.state.race;
+  if (r.phase === 'countdown') return `RACE — ${Math.ceil(r.countdown)}`;
+  if (r.phase === 'racing') {
+    const mins = Math.floor(r.lapTime / 60);
+    const secs = (r.lapTime % 60).toFixed(1);
+    return `RACE — POS ${r.position}/4 · ${mins}:${secs.padStart(4, '0')}`;
+  }
+  if (r.phase === 'done') {
+    const place = r.position === 1 ? '1st' : r.position === 2 ? '2nd' : r.position === 3 ? '3rd' : '4th';
+    return `RACE DONE — ${place} · $${r.prize}`;
+  }
+  return r.wins > 0 ? `RACES WON ${r.wins} · BEST ${r.best.toFixed(1)}s` : '';
+}
+
+// The taxi line: the live fare with its estimated payout, or the career
+// rating once the player has driven a job.
+function taxiLine() {
+  const t = world.state.taxi;
+  if (t.active) {
+    const fare = t.fare;
+    const est = Math.round(TAXI_BASE_FARE + TAXI_PER_METER * Math.hypot(fare.dx - fare.ped.x, fare.dz - fare.ped.z));
+    return `TAXI — drop the passenger · ~$${est}`;
+  }
+  if (t.fare) return 'TAXI — pick up the fare';
+  if (t.jobs > 0) return `TAXI ★${t.rating.toFixed(1)} · ${t.jobs} jobs · $${t.total} earned`;
+  return '';
+}
+
 function runShot(name) {
   const staged = stageShot(name, world);
   city.setCameraMode('shot', { shot: name });
@@ -99,6 +151,13 @@ function runShot(name) {
     prompt: '',
     target: world.missionTarget(),
     objective: missionObjective(),
+    weatherLine: world.weather.label(),
+    raceLine: raceLine(),
+    taxiLine: taxiLine(),
+    challengeLine: world.challenges.line(),
+    achievementLine: world.achievements.line(),
+    packageLine: world.packages.line(),
+    garage: world.garage.state,
   };
   hud.update(world.state, info);
   let painted = 0;
@@ -134,7 +193,9 @@ function runGame() {
     const s = world.state;
     const mins = Math.floor(s.time / 60);
     const secs = Math.floor(s.time % 60);
-    return `Chapter ${s.missionIndex + 1}/7 · $${s.cash} · ${s.wanted === 0 ? 'clean' : `wanted ${s.wanted}`} · ${mins}:${String(secs).padStart(2, '0')} in the city · ${audio.stationName()}`;
+    const challengeSummary = world.challenges.summary();
+    const achievementSummary = world.achievements.summary();
+    return `Chapter ${s.missionIndex + 1}/7 · $${s.cash} · ${s.wanted === 0 ? 'clean' : `wanted ${s.wanted}`} · ${mins}:${String(secs).padStart(2, '0')} in the city · ${audio.stationName()}${s.race.wins > 0 ? ` · ${s.race.wins} race wins` : ''}${s.taxi.jobs > 0 ? ` · taxi ★${s.taxi.rating.toFixed(1)}` : ''}${s.packages.found > 0 ? ` · 📦 ${s.packages.found}/50 packages` : ''}${challengeSummary ? ` · ${challengeSummary}` : ''}${achievementSummary ? ` · ${achievementSummary}` : ''}`;
   }
 
   function pauseGame() {
@@ -175,6 +236,27 @@ function runGame() {
     if (actions & ACTION_MUTE) audio.toggleMute();
     if (actions & ACTION_RADIO) audio.nextStation();
     if (actions & ACTION_HORN) audio.horn();
+    // Mara's shop eats the frame's keys: W/S pick, Enter buys, G closes.
+    // The world is paused behind it, so no cop or fare can interrupt.
+    if (screen === SCREEN_PLAY && world.garage.state.open) {
+      const wish = input.moveWish();
+      if (wish.y > 0.5) world.garage.moveSelection(-1);
+      else if (wish.y < -0.5) world.garage.moveSelection(1);
+      if (actions & ACTION_CONFIRM) {
+        const result = world.garage.buySelected();
+        if (result === 'bought') audio.buy();
+        else audio.fail();
+      }
+      if (actions & ACTION_GARAGE) {
+        world.garage.closeShop();
+        // The closing G must not reach the world and reopen the shop.
+        queuedActions &= ~ACTION_GARAGE;
+      } else if (actions & ACTION_PAUSE) {
+        world.garage.closeShop();
+        pauseGame();
+      }
+      return;
+    }
     if (screen === SCREEN_TITLE) {
       if (actions & ACTION_RADIO) {
         // The station already advanced above; just name it, so the player
@@ -228,9 +310,15 @@ function runGame() {
       return;
     }
     if (screen !== SCREEN_PLAY) return;
+    // The shop pauses the world behind it.
+    if (world.garage.state.open) {
+      queuedActions = 0;
+      return;
+    }
     const actions = firstStep ? queuedActions : 0;
     queuedActions = 0;
     const wish = worldWish();
+    const racePhaseBefore = world.state.race.phase;
     const events = world.step(STEP, {
       x: wish.x,
       y: wish.y,
@@ -238,6 +326,8 @@ function runGame() {
       enter: Boolean(actions & ACTION_ENTER),
       punch: Boolean(actions & ACTION_PUNCH),
       dance: Boolean(actions & ACTION_DANCE),
+      garage: Boolean(actions & ACTION_GARAGE),
+      nitro: Boolean(actions & ACTION_NITRO),
     }, false);
     if (events & EVENT_MISSION) {
       audio.missionDone();
@@ -249,6 +339,25 @@ function runGame() {
     if (events & EVENT_RAM) audio.crash();
     if (events & EVENT_CRASH) audio.crash();
     if (events & EVENT_MISSION_FAIL) audio.fail();
+    // Round-3 side systems: the countdown ticks, the green light, the
+    // finish fanfare, the taxi meter and the storm rumble.
+    if (events & EVENT_RACE_COUNT) audio.countdown();
+    if (racePhaseBefore === 'countdown' && world.state.race.phase === 'racing') audio.raceGo();
+    if (events & EVENT_RACE_DONE) audio.raceDone();
+    if (events & EVENT_TAXI_PICKUP) audio.blip(880, 1108, 0.1, 0.25);
+    if (events & EVENT_TAXI_DROPOFF) {
+      audio.fare();
+      writeSave();
+    }
+    if (events & EVENT_THUNDER) audio.thunder();
+    if (events & EVENT_CHALLENGE) audio.challenge();
+    if (events & EVENT_NITRO) audio.boost();
+    if (events & EVENT_ACHIEVEMENT) audio.achievement();
+    // A hidden package: the pickup chime, and the hunt is saved at once.
+    if (events & EVENT_PACKAGE) {
+      audio.pickup();
+      writeSave();
+    }
     if (events & EVENT_WIN) {
       audio.win();
       writeSave();
@@ -270,6 +379,9 @@ function runGame() {
     const p = world.state.player;
     const car = world.state.cars.find((c) => c.kind === 'player');
     const nearCar = p.onFoot ? world.nearestParkedCar(p.x, p.z, 4) : null;
+    // Nitro charges show in the driving prompt, so the driver knows the
+    // burst is there before the race starts.
+    const nitroHint = !p.onFoot && world.garage.state.nitro > 0 ? ` · N nitro x${world.garage.state.nitro}` : '';
     return {
       stationName: audio.stationName(),
       muted: audio.isMuted(),
@@ -278,10 +390,17 @@ function runGame() {
       prompt: nearCar
         ? 'Press E to steal the car'
         : p.onFoot
-          ? 'WASD move · Shift run · E steal car · Space punch · F dance'
-          : 'WASD drive · E get out · Space punch · F dance · R radio',
+          ? 'WASD move · Shift run · E steal car · Space punch · F dance · G garage'
+          : `WASD drive · E get out · Space punch · F dance · R radio${nitroHint}`,
       target: world.missionTarget(),
       objective: missionObjective(),
+      weatherLine: world.weather.label(),
+      raceLine: raceLine(),
+      taxiLine: taxiLine(),
+      challengeLine: world.challenges.line(),
+      achievementLine: world.achievements.line(),
+      packageLine: world.packages.line(),
+      garage: world.garage.state,
     };
   }
 
@@ -300,7 +419,7 @@ function runGame() {
     }
     if (screen !== SCREEN_TITLE && screen !== SCREEN_PLAY) accumulator = 0;
     const car = world.state.cars.find((c) => c.kind === 'player');
-    audio.update(STEP, car ? car.speed : 0, world.state.wanted);
+    audio.update(STEP, car ? car.speed : 0, world.state.wanted, world.state.weather.rain);
     city.sync(STEP);
     city.render();
     if (!loadingHidden) {

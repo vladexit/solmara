@@ -1,7 +1,7 @@
 // The 3D city: Three.js scene, dusk lighting, the chase camera and the cinematic
 // title camera. It only renders state the world owns; it never changes the rules.
 import * as THREE from 'three';
-import { BLOCK, CITY_HALF, PITCH, ROAD, ROAD_COORDS } from './config.js';
+import { BLOCK, CITY_HALF, GARAGE_POS, PITCH, RACE_START_PAD, ROAD, ROAD_COORDS } from './config.js';
 import { hashInt } from './random.js';
 
 const DUSK_SKY_TOP = 0x1a1033;
@@ -188,7 +188,8 @@ function makeCarMesh(color, isPolice, style) {
     group.add(barRed);
     group.add(barBlue);
   }
-  return { group, wheels, barRed, barBlue };
+  // Returned so the caller can repaint the body when Mara changes the paint.
+  return { group, wheels, barRed, barBlue, bodyMat };
 }
 
 function makePedMesh(color, isPlayer) {
@@ -276,8 +277,11 @@ export function createCity(canvas, state, getMissionTarget) {
   sun.shadow.bias = -0.002;
   scene.add(sun);
   scene.add(sun.target);
-  scene.add(new THREE.HemisphereLight(0x9a7bff, 0x201812, 1.05));
-  scene.add(new THREE.AmbientLight(0x665577, 0.7));
+  // Named so the weather can dim them at night and flash them in a storm.
+  const hemi = new THREE.HemisphereLight(0x9a7bff, 0x201812, 1.05);
+  scene.add(hemi);
+  const ambient = new THREE.AmbientLight(0x665577, 0.7);
+  scene.add(ambient);
 
   // Ground and sidewalks.
   const ground = new THREE.Mesh(
@@ -493,6 +497,25 @@ export function createCity(canvas, state, getMissionTarget) {
     scene.add(mesh);
   }
 
+  // Race start pad on Neon Row: a burnt-orange square on the asphalt, and
+  // Mara's garage sign over the workshop door, so both are findable by eye.
+  {
+    const pad = new THREE.Mesh(
+      new THREE.PlaneGeometry(10, 10),
+      new THREE.MeshBasicMaterial({ color: 0xff5a3c, transparent: true, opacity: 0.55, depthWrite: false }),
+    );
+    pad.rotation.x = -Math.PI / 2;
+    pad.position.set(RACE_START_PAD.x, 0.06, RACE_START_PAD.z);
+    scene.add(pad);
+    const tex = signTexture("MARA'S GARAGE", '#ff2ea6');
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(30, 5),
+      new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }),
+    );
+    mesh.position.set(GARAGE_POS.x, 9, GARAGE_POS.z);
+    scene.add(mesh);
+  }
+
   // Golden Token: spinning gold torus with a glow sprite.
   const tokenGroup = new THREE.Group();
   const tokenMesh = new THREE.Mesh(
@@ -511,9 +534,10 @@ export function createCity(canvas, state, getMissionTarget) {
   const beaconMat = new THREE.MeshBasicMaterial({ color: 0xffd24d, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false });
   const beacon = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.6, 34, 16, 1, true), beaconMat);
   scene.add(beacon);
+  const arrowMat = new THREE.MeshBasicMaterial({ color: 0xffd24d });
   const arrow = new THREE.Mesh(
     new THREE.ConeGeometry(1.1, 2.4, 4),
-    new THREE.MeshBasicMaterial({ color: 0xffd24d }),
+    arrowMat,
   );
   arrow.rotation.x = Math.PI;
   scene.add(arrow);
@@ -527,6 +551,16 @@ export function createCity(canvas, state, getMissionTarget) {
     const built = makeCarMesh(car.color, car.kind === 'police', style);
     built.group.position.set(car.x, 0.05, car.z);
     built.group.rotation.y = car.heading;
+    // Neon underglow: a magenta pool under the car, dark until Mara installs it.
+    const glow = new THREE.Mesh(
+      new THREE.PlaneGeometry(4.4, 6),
+      new THREE.MeshBasicMaterial({ map: glowTexture(), color: 0xff2ea6, transparent: true, opacity: 0.85, depthWrite: false }),
+    );
+    glow.rotation.x = -Math.PI / 2;
+    glow.position.y = 0.06;
+    glow.visible = false;
+    built.group.add(glow);
+    built.glow = glow;
     scene.add(built.group);
     carMeshes.set(car.id, built);
     return built;
@@ -641,6 +675,9 @@ export function createCity(canvas, state, getMissionTarget) {
       if (!built) built = addCarMesh(car);
       built.group.position.set(car.x, 0.05, car.z);
       built.group.rotation.y = car.heading;
+      // Mara's paint follows the car, and the neon follows the upgrade.
+      if (built.bodyMat && built.bodyMat.color.getHex() !== car.color) built.bodyMat.color.setHex(car.color);
+      if (built.glow) built.glow.visible = !!car.neon;
       for (const wheel of built.wheels) wheel.rotation.x = car.wheelSpin;
       if (built.barRed && built.barBlue) {
         const on = Math.floor(state.time * 4) % 2 === 0;
@@ -679,6 +716,9 @@ export function createCity(canvas, state, getMissionTarget) {
     state.peds.forEach((ped, i) => {
       const built = pedMeshes.get(i);
       if (!built) return;
+      // A taxi passenger rides inside the cab: hide the walking figure.
+      built.group.visible = ped.mode !== 'ride';
+      if (ped.mode === 'ride') return;
       built.group.position.set(ped.x, 0.05, ped.z);
       built.group.rotation.y = ped.heading;
       const swing = ped.downTimer > 0 ? 0 : Math.sin(ped.walkPhase) * 0.45;
@@ -691,9 +731,13 @@ export function createCity(canvas, state, getMissionTarget) {
     tokenGroup.visible = !state.token.taken;
     tokenMesh.rotation.y += dt * 1.6;
     tokenGroup.position.y = 1.6 + Math.sin(state.time * 2) * 0.25;
-    // Mission beacon over the current target.
+    // Mission beacon over the current target. Taxi markers recolor it:
+    // cyan while the fare waits, green once they are riding.
     const target = getMissionTarget();
     if (target && !state.won) {
+      const beaconColor = target.color || 0xffd24d;
+      beaconMat.color.setHex(beaconColor);
+      arrowMat.color.setHex(beaconColor);
       beacon.visible = true;
       arrow.visible = true;
       beacon.position.set(target.x, 17, target.z);
@@ -701,6 +745,21 @@ export function createCity(canvas, state, getMissionTarget) {
     } else {
       beacon.visible = false;
       arrow.visible = false;
+    }
+    // Weather: the sun follows the clock, rain greys the sky, lightning
+    // flashes the whole scene for a heartbeat.
+    const w = state.weather;
+    if (w) {
+      const day = w.daylight;
+      sun.intensity = 0.4 + 1.5 * day;
+      sun.color.setHex(day > 0.55 ? 0xff9a5c : 0x8a9bd8);
+      hemi.intensity = 0.5 + 0.7 * day;
+      ambient.intensity = 0.4 + 0.4 * day;
+      scene.fog.color.setHex(w.rain > 0.3 ? 0x3a3f4a : 0x4a3560);
+      if (w.lightning > 0) {
+        ambient.intensity = 2.2;
+        sun.intensity = 3;
+      }
     }
     // The low sun follows the player so shadows stay close.
     sun.position.set(p.x + 90, 90, p.z - 70);

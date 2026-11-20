@@ -6,10 +6,26 @@
 // lamps, signs) is generated once from the seed and never changes.
 import {
   BLOCK, BUILDING_MAX_H, CAR_ACCEL, CAR_MAX_SPEED, CAR_REVERSE, CAR_TURN,
-  CITY_HALF, FEED_POOL, MISSIONS, PED_COUNT, PITCH, POLICE_SPEED,
-  POLICE_TOP_SPEED, ROAD, ROAD_COORDS, RUN_SPEED, START_CASH, TOKEN_SPOT,
-  TRAFFIC_COUNT, WALK_SPEED,
+  CITY_HALF, FEED_POOL, MISSIONS, NITRO_BOOST, NITRO_SECONDS, PED_COUNT, PITCH,
+  POLICE_SPEED, POLICE_TOP_SPEED, ROAD, ROAD_COORDS, RUN_SPEED, START_CASH,
+  TOKEN_SPOT, TRAFFIC_COUNT, WALK_SPEED,
 } from './config.js';
+import { createRace } from './race.js';
+import { createGarage } from './garage.js';
+import { createWeather } from './weather.js';
+import { createTaxi } from './taxi.js';
+import { createChallenges } from './challenges.js';
+import { createAchievements } from './achievements.js';
+import { createPackages } from './packages.js';
+
+// Round-3 side-system events, re-exported so the caller can map them to
+// sounds without importing four more modules.
+export { EVENT_RACE_COUNT, EVENT_RACE_DONE } from './race.js';
+export { EVENT_TAXI_PICKUP, EVENT_TAXI_DROPOFF } from './taxi.js';
+export { EVENT_THUNDER } from './weather.js';
+export { EVENT_CHALLENGE } from './challenges.js';
+export { EVENT_ACHIEVEMENT } from './achievements.js';
+export { EVENT_PACKAGE } from './packages.js';
 
 export const EVENT_MISSION = 1;
 export const EVENT_BUSTED = 2;
@@ -21,6 +37,7 @@ export const EVENT_WIN = 64;
 export const EVENT_MISSION_FAIL = 128;
 export const EVENT_RAM = 256;
 export const EVENT_CRASH = 512;
+export const EVENT_NITRO = 131072;
 
 const CAR_COLORS = [0xd8d8e0, 0x3a6fd8, 0xd83a3a, 0x3ad8a0, 0xe0a53a, 0x8a5ad8, 0x222226, 0xd8d8d8];
 const PED_COLORS = [0xe0a53a, 0x3a6fd8, 0xd83a7a, 0x3ad8a0, 0xe8e8e8, 0x8a5ad8, 0x5ad8d8];
@@ -179,6 +196,24 @@ export function createWorld(random) {
     stats: { stolen: 0, punches: 0, missionsDone: 0, rams: 0 },
   };
 
+  // Round-3 side systems: street races, Mara's garage, weather and taxi
+  // work. Each owns its own state on the world state and steps alongside
+  // the missions; the helpers are hoisted, so the api can name them here.
+  const race = createRace({ random, state, dist2, angleTo, nearestRoadCoord, pushFeed, playerCar });
+  const garage = createGarage({ random, state, dist2, pushFeed, playerCar });
+  const weather = createWeather({ random, state, pushFeed });
+  const taxi = createTaxi({ random, state, dist2, angleTo, nearestRoadCoord, pushFeed, playerCar });
+  const challenges = createChallenges({ random, state, pushFeed });
+  const achievements = createAchievements({ random, state, pushFeed });
+  const packages = createPackages({ state, dist2, pushFeed });
+  state.race = race.state;
+  state.garage = garage.state;
+  state.weather = weather.state;
+  state.taxi = taxi.state;
+  state.challenges = challenges.state;
+  state.achievements = achievements.state;
+  state.packages = packages.state;
+
   let carSeq = 0;
   function makeCar(kind, x, z, heading, color) {
     return {
@@ -193,6 +228,9 @@ export function createWorld(random) {
       lat: 0, wobble: 0, rammedAt: -99,
       // Police extras: a per-car speed jitter and the roadblock flag.
       jitter: random.range(-1, 1), roadblock: false,
+      // Garage upgrades ride with the driver, not the car: Mara tunes
+      // whatever the player is driving, and a stolen car starts stock.
+      upgrades: null, neon: false,
     };
   }
   // The player's car, looked up by id: array indices shift when police despawn.
@@ -229,6 +267,13 @@ export function createWorld(random) {
     state.token = { x: TOKEN_SPOT.x, z: TOKEN_SPOT.z, taken: false };
     state.feed = [];
     state.stats = { stolen: 0, punches: 0, missionsDone: 0, rams: 0 };
+    race.reset();
+    garage.reset();
+    weather.reset();
+    taxi.reset();
+    challenges.reset();
+    achievements.reset();
+    packages.reset();
     const p = state.player;
     p.x = 24; p.z = 40; p.heading = Math.PI; p.speed = 0;
     p.onFoot = true; p.carId = -1; p.walkPhase = 0; p.punchTimer = 0; p.danceTimer = 0; p.moving = false;
@@ -281,6 +326,9 @@ export function createWorld(random) {
         color: PED_COLORS[random.int(0, PED_COLORS.length - 1)],
         mode, fleeTimer: 0, tx: 0, tz: 0, walkPhase: random.range(0, 6),
         downTimer: 0,
+        // Taxi work: a waiting passenger is flagged so the crowd logic
+        // leaves them standing on the corner until the cab arrives.
+        taxi: false,
       });
     }
     state.police = [];
@@ -399,6 +447,8 @@ export function createWorld(random) {
         ped.downTimer -= dt;
         continue;
       }
+      // A taxi passenger rides in the cab: the taxi system moves them.
+      if (ped.mode === 'ride') continue;
       if (ped.mode === 'flee') {
         ped.fleeTimer -= dt;
         const a = angleTo(p.x, p.z, ped.x, ped.z);
@@ -409,9 +459,10 @@ export function createWorld(random) {
         if (ped.fleeTimer <= 0) ped.mode = 'walk';
       } else if (ped.mode === 'idle') {
         // Standing around chatting: slow turn, occasional small step.
+        // A flagged taxi passenger waits on the corner and never wanders.
         ped.heading += dt * 0.4;
         ped.walkPhase += dt * 1.5;
-        if (random.next() < 0.002) ped.mode = 'walk';
+        if (!ped.taxi && random.next() < 0.002) ped.mode = 'walk';
       } else {
         // Walk or jog toward a sidewalk waypoint; pick a new one on arrival.
         if (Math.hypot(ped.tx - ped.x, ped.tz - ped.z) < 2 || (ped.tx === 0 && ped.tz === 0)) {
@@ -630,8 +681,20 @@ export function createWorld(random) {
       } else if (car) {
         // Driving: y = throttle, x = steering. Each stolen car is tuned a
         // little differently, so the top speed is the car's, not the city's.
-        const maxSpeed = CAR_MAX_SPEED * (car.tune || 1);
-        if (input.y > 0) car.speed += CAR_ACCEL * dt;
+        // Mara's engine tunes add top speed; rain takes some of it away.
+        // Nitro: a garage-bought burst — press N for three seconds of +10.
+        if (input.nitro && garage.state.nitro > 0 && garage.state.nitroTimer <= 0) {
+          garage.state.nitro -= 1;
+          garage.state.nitroTimer = NITRO_SECONDS;
+          events |= EVENT_NITRO;
+          pushFeed('@MaraVoss', 'Nitro! Mara hopes you know where the brakes are.');
+        }
+        if (garage.state.nitroTimer > 0) garage.state.nitroTimer -= dt;
+        const boost = garage.state.nitroTimer > 0 ? NITRO_BOOST : 0;
+        const tuneBonus = car.upgrades ? car.upgrades.engine * 2 : 0;
+        const grip = weather.state.grip;
+        const maxSpeed = (CAR_MAX_SPEED + tuneBonus + boost) * grip * (car.tune || 1);
+        if (input.y > 0) car.speed += CAR_ACCEL * grip * dt;
         else if (input.y < 0) car.speed -= (car.speed > 0.5 ? CAR_ACCEL * 1.4 : CAR_REVERSE) * dt;
         else car.speed -= Math.sign(car.speed) * Math.min(Math.abs(car.speed), 8 * dt);
         car.speed = Math.max(-CAR_REVERSE, Math.min(maxSpeed, car.speed));
@@ -644,7 +707,10 @@ export function createWorld(random) {
         const fixed = collideBuildings(car.x, car.z, 1.9);
         if (fixed.hit && Math.abs(car.speed) > 6) {
           car.speed *= 0.4;
-          state.health = Math.max(0, state.health - 2);
+          // Mara's armor plates soak part of every crash.
+          const plates = car.upgrades ? car.upgrades.armor : 0;
+          const dent = Math.max(0.5, 2 - plates * 0.5);
+          state.health = Math.max(0, state.health - dent);
           events |= EVENT_CRASH;
         }
         car.x = fixed.x;
@@ -792,6 +858,15 @@ export function createWorld(random) {
       }
     }
 
+    // ---- round-3 side systems: weather, races, garage, taxi, challenges ----
+    events |= weather.step(dt, input, attract);
+    events |= race.step(dt, input, attract);
+    events |= garage.step(dt, input, attract);
+    events |= taxi.step(dt, input, attract);
+    events |= challenges.step(dt, input, attract);
+    events |= achievements.step(dt, input, attract);
+    events |= packages.step(dt, input, attract);
+
     stepTraffic(dt);
     stepPeds(dt, car);
     const policeNear = stepPolice(dt);
@@ -837,6 +912,12 @@ export function createWorld(random) {
     state.missionIndex = Math.min(save.missionIndex ?? 0, MISSIONS.length - 1);
     state.missionPoint = 0;
     if (save.tokenTaken) state.token.taken = true;
+    // Garage upgrades persist across sessions; the paint, tunes and armor
+    // are re-applied to the next car the player steals.
+    garage.applySave(save.garage);
+    // The package hunt persists too: found parcels stay found, and paid
+    // milestones never pay twice.
+    packages.applySave(save.packages);
     enterPoint();
   }
 
@@ -844,5 +925,6 @@ export function createWorld(random) {
   return {
     state, reset, step, respawnAfterBusted, applySave,
     currentMission, missionTarget, nearestParkedCar,
+    race, garage, weather, taxi, challenges, achievements, packages,
   };
 }

@@ -10,6 +10,8 @@ export const ACTION_RADIO = 32;
 export const ACTION_MUTE = 64;
 export const ACTION_CONTINUE = 128;
 export const ACTION_HORN = 256;
+export const ACTION_GARAGE = 512;
+export const ACTION_NITRO = 1024;
 
 const KEY_ACTIONS = {
   Enter: ACTION_CONFIRM,
@@ -22,6 +24,8 @@ const KEY_ACTIONS = {
   KeyP: ACTION_PAUSE,
   Escape: ACTION_PAUSE,
   KeyH: ACTION_HORN,
+  KeyG: ACTION_GARAGE,
+  KeyN: ACTION_NITRO,
 };
 
 export function createInput(canvas) {

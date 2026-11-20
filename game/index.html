@@ -50,6 +50,20 @@
   #paused-screen .big-word { color: #eef1f5; }
   #won-screen .big-word { color: #ffd24d; text-shadow: 0 0 26px rgba(255, 210, 77, 0.7); }
   #hud-objective { margin-top: 4px; font-size: 15px; font-weight: 800; color: #ffd24d; letter-spacing: 1px; }
+  #hud-weather { margin-top: 4px; font-size: 13px; font-weight: 700; color: #7dd8ff; letter-spacing: 1px; }
+  #hud-race { margin-top: 2px; font-size: 14px; font-weight: 800; color: #ff5a3c; letter-spacing: 1px; }
+  #hud-taxi { margin-top: 2px; font-size: 14px; font-weight: 800; color: #2dd4ff; letter-spacing: 1px; }
+  #hud-challenge { margin-top: 2px; font-size: 13px; font-weight: 700; color: #ffd24d; letter-spacing: 1px; }
+  #hud-achievements { margin-top: 2px; font-size: 13px; font-weight: 700; color: #ffb3e0; letter-spacing: 1px; }
+  #hud-packages { margin-top: 2px; font-size: 13px; font-weight: 700; color: #ffb020; letter-spacing: 1px; }
+  /* Mara's garage: a shop panel in the middle of the screen, filled by the HUD. */
+  #garage-screen { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 12; background: rgba(8, 6, 18, 0.92); border: 1px solid rgba(255, 46, 166, 0.6); border-radius: 12px; padding: 20px 26px; color: #eef1f5; min-width: 480px; }
+  #garage-screen h2 { font-size: 28px; letter-spacing: 4px; color: #ff2ea6; margin: 0 0 4px; }
+  #garage-screen .cash { font-size: 18px; font-weight: 800; color: #ffd24d; margin-bottom: 8px; }
+  #garage-screen div { font-size: 15px; line-height: 1.9; }
+  #garage-screen div.sel { background: rgba(255, 46, 166, 0.28); border-radius: 4px; padding: 0 8px; color: #fff; }
+  #garage-screen div.sel b { color: #ffd24d; }
+  #garage-screen .keys { font-size: 13px; color: #cfd6e4; margin-top: 10px; }
   .sub { font-size: 16px; color: #dfe4ee; line-height: 1.5; }
   #win-stats { font-size: 15px; font-weight: 700; color: #7dff5a; line-height: 1.6; margin: 12px 0 4px; }
   #paused-stats { font-size: 15px; font-weight: 700; color: #7dff5a; line-height: 1.6; margin: 12px 0 4px; }
@@ -64,11 +78,12 @@
 
 <div id="hud-top-left" class="panel"><div id="hud-cash">$60</div><div id="hud-health-wrap"><span id="hud-health-bar" class="health"></span></div><div id="hud-health-label">HEALTH</div></div>
 <div id="hud-top-right" class="panel"><div id="hud-wanted">☆☆☆☆☆</div><div id="hud-wanted-label">CLEAN</div></div>
-<div id="hud-mission" class="panel"><div id="hud-mission-title">Chapter 1 — New in Town</div><div id="hud-mission-brief">Walk to Mara&rsquo;s Garage.</div><div id="hud-objective"></div><div id="hud-hint"></div></div>
+<div id="hud-mission" class="panel"><div id="hud-mission-title">Chapter 1 — New in Town</div><div id="hud-mission-brief">Walk to Mara&rsquo;s Garage.</div><div id="hud-objective"></div><div id="hud-hint"></div><div id="hud-weather"></div><div id="hud-race"></div><div id="hud-taxi"></div><div id="hud-challenge"></div><div id="hud-achievements"></div><div id="hud-packages"></div></div>
 <div id="hud-feed" class="panel"></div>
 <div id="hud-bottom-left" class="panel"><canvas id="minimap" width="176" height="176"></canvas></div>
 <div id="hud-bottom-right" class="panel"><div id="hud-radio">DANGDUT PANTURA</div><div id="hud-speed"></div><div>Drag mouse to look &middot; Scroll to zoom</div></div>
 <div id="hud-prompt" class="panel"></div>
+<div id="garage-screen" class="hidden"></div>
 
 <div id="title-screen" class="overlay">
   <div class="overlay-card">
@@ -81,6 +96,7 @@
     <div class="contract-badge">★ THE 10-DAY CONTRACT — 7 CHAPTERS — ONE BIG SCORE ★</div>
     <p class="controls"><b>WASD</b> move / drive &nbsp;·&nbsp; <b>Shift</b> run &nbsp;·&nbsp; <b>E</b> steal &amp; exit car &nbsp;·&nbsp; <b>Space</b> punch &nbsp;·&nbsp; <b>F</b> dance &nbsp;·&nbsp; <b>H</b> horn &nbsp;·&nbsp; <b>R</b> radio &nbsp;·&nbsp; <b>P</b> pause<br>
     Steal a car, follow the gold beacon, and watch the stars — five of them means the whole city is coming for you.</p>
+    <p class="controls">New in town: <b>street races</b> on Neon Row, <b>Mara&rsquo;s Garage</b> (press <b>G</b> at the pink sign), <b>taxi fares</b> for quick cash, ten <b>achievements</b> to chase, and a living sky — day, night and rain.</p>
     <div class="start-prompt">PRESS ENTER TO START</div>
     <div id="continue-line" class="hidden"></div>
   </div>

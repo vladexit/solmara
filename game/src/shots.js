@@ -3,7 +3,7 @@
 // simple autopilot — walk to the mission target, steal a car on the way, drive
 // the road grid toward the target — so the frame is what a short game really
 // looks like and the same seed always gives the same frame.
-import { ROAD_COORDS, STEP } from './config.js';
+import { GARAGE_POS, RACE_COURSE, RACE_START_PAD, ROAD_COORDS, STEP } from './config.js';
 import { EVENT_BUSTED } from './world.js';
 import { SCREEN_BUSTED, SCREEN_PLAY, SCREEN_TITLE, SCREEN_WON } from './render.js';
 
@@ -84,6 +84,30 @@ function autopilot(world, reverseTimer) {
   return { x: steer, y: 1, run: false, enter: false, punch: false, dance: false };
 }
 
+// Drive the player's car toward any (tx, tz) on the road grid, reversing
+// when wedged. The race and taxi scenes steer with this; the mission
+// autopilot above has its own copy for the story shots.
+function driveToward(world, reverseTimer, tx, tz) {
+  const car = world.state.cars.find((c) => c.kind === 'player');
+  const idle = { x: 0, y: 0, run: false, enter: false, punch: false, dance: false };
+  if (!car) return idle;
+  const wp = routeWaypoint(car.x, car.z, tx, tz);
+  const want = Math.atan2(wp.x - car.x, wp.z - car.z);
+  const steer = Math.max(-1, Math.min(1, clampAngle(want - car.heading) * 1.6));
+  // Wedged against a wall: back up for a second, then try again.
+  if (Math.abs(car.speed) < 0.8) reverseTimer.stuck += STEP;
+  else reverseTimer.stuck = 0;
+  if (reverseTimer.stuck > 2) {
+    reverseTimer.stuck = 0;
+    reverseTimer.value = 1.2;
+  }
+  if (reverseTimer.value > 0) {
+    reverseTimer.value -= STEP;
+    return { x: -steer, y: -1, run: false, enter: false, punch: false, dance: false };
+  }
+  return { x: steer, y: 1, run: false, enter: false, punch: false, dance: false };
+}
+
 /**
  * Set `world` to the named scene (start, play, chase or busted; any other name
  * is start) and return the screen to draw over it.
@@ -117,6 +141,83 @@ export function stageShot(name, world) {
       world.step(STEP, { x: 0, y: 0, run: false, enter: false, punch: false, dance: false }, false);
     }
     return { screen: SCREEN_WON };
+  }
+  if (name === 'race') {
+    // Stage a street race mid-flight: put the player on the Neon Row pad,
+    // let the countdown run, then chase the first gates with the rivals.
+    const p = world.state.player;
+    const car = world.state.cars.find((c) => c.kind === 'parked');
+    if (car) {
+      car.kind = 'player';
+      p.onFoot = false;
+      p.carId = car.id;
+      car.x = RACE_START_PAD.x;
+      car.z = RACE_START_PAD.z;
+      car.heading = 0;
+      p.x = car.x;
+      p.z = car.z;
+    }
+    world.state.time = 61;
+    for (let i = 0; i < 4 / STEP; i += 1) {
+      world.step(STEP, { x: 0, y: 0, run: false, enter: false, punch: false, dance: false }, false);
+    }
+    for (let i = 0; i < 8 / STEP; i += 1) {
+      const gate = RACE_COURSE[Math.min(world.state.race.next, RACE_COURSE.length - 1)];
+      world.step(STEP, driveToward(world, reverseTimer, gate.x, gate.z), false);
+    }
+    return { screen: SCREEN_PLAY };
+  }
+  if (name === 'taxi') {
+    // Stage a taxi fare: put the player in a car at a quiet crossing with
+    // a waiting passenger five metres away, so the fare is offered and
+    // picked up on the first two steps, then run the cab toward the drop.
+    const p = world.state.player;
+    const car = world.state.cars.find((c) => c.kind === 'parked');
+    if (car) {
+      car.kind = 'player';
+      p.onFoot = false;
+      p.carId = car.id;
+      car.x = 60;
+      car.z = 0;
+      car.heading = Math.PI / 2;
+      p.x = car.x;
+      p.z = car.z;
+    }
+    world.state.time = 61;
+    const ped = world.state.peds.find((q) => q.mode === 'idle') || world.state.peds[0];
+    ped.mode = 'idle';
+    ped.taxi = false;
+    ped.x = 65;
+    ped.z = 0;
+    for (let i = 0; i < 2 / STEP; i += 1) {
+      world.step(STEP, { x: 0, y: 0, run: false, enter: false, punch: false, dance: false }, false);
+    }
+    if (world.state.taxi.fare) {
+      for (let i = 0; i < 6 / STEP && world.state.taxi.active; i += 1) {
+        const fare = world.state.taxi.fare;
+        world.step(STEP, driveToward(world, reverseTimer, fare.dx, fare.dz), false);
+      }
+    }
+    return { screen: SCREEN_PLAY };
+  }
+  if (name === 'packages') {
+    // Stage a package pickup: put the player on foot beside the first
+    // hidden package, step once, and the counter ticks to 1.
+    const p = world.state.player;
+    const spot = world.state.packages.spots[0];
+    p.x = spot.x + 1;
+    p.z = spot.z;
+    world.step(STEP, { x: 0, y: 0, run: false, enter: false, punch: false, dance: false }, false);
+    return { screen: SCREEN_PLAY };
+  }
+  if (name === 'garage') {
+    // Stage Mara's shop: walk the player to the garage door and open it.
+    const p = world.state.player;
+    p.x = GARAGE_POS.x + 2;
+    p.z = GARAGE_POS.z + 2;
+    world.state.time = 61;
+    world.step(STEP, { x: 0, y: 0, run: false, enter: false, punch: false, dance: false, garage: true }, false);
+    return { screen: SCREEN_PLAY };
   }
   if (name !== 'play' && name !== 'chase' && name !== 'busted') {
     for (let i = 0; i < START_SECONDS / STEP; i += 1) {

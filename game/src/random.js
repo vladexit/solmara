@@ -19,6 +19,11 @@ export function createRandom(seed) {
     pick(list) {
       return list[Math.floor(this.next() * list.length)];
     },
+    // A bell-shaped roll (the average of two uniform draws): weather front
+    // lengths and taxi fares cluster near the middle instead of the edges.
+    bell(min, max) {
+      return min + ((this.next() + this.next()) / 2) * (max - min);
+    },
     // Fisher-Yates shuffle, in place, driven by this seed: the ground-fill
     // props and the parked-car rows come out varied but deterministic.
     shuffle(list) {

@@ -54,6 +54,9 @@ export function createAudio() {
   let siren = null;
   let sirenGain = null;
   let sirenPhase = 0;
+  // Rain: a looping noise wash, silent until a front rolls in.
+  let rain = null;
+  let rainGain = null;
 
   function unlock() {
     if (ctx) {
@@ -91,6 +94,23 @@ export function createAudio() {
       siren.connect(sirenGain);
       sirenGain.connect(master);
       siren.start();
+      // Rain: a two-second noise loop through a lowpass, gain driven by the
+      // weather each frame. The loop seam is too quiet to hear under it.
+      const rainBuf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+      const rainData = rainBuf.getChannelData(0);
+      for (let i = 0; i < rainData.length; i += 1) rainData[i] = Math.random() * 2 - 1;
+      rain = ctx.createBufferSource();
+      rain.buffer = rainBuf;
+      rain.loop = true;
+      const rainFilter = ctx.createBiquadFilter();
+      rainFilter.type = 'lowpass';
+      rainFilter.frequency.value = 900;
+      rainGain = ctx.createGain();
+      rainGain.gain.value = 0;
+      rain.connect(rainFilter);
+      rainFilter.connect(rainGain);
+      rainGain.connect(master);
+      rain.start();
       nextTime = ctx.currentTime + 0.1;
     } catch {
       ctx = null;
@@ -140,7 +160,8 @@ export function createAudio() {
   }
 
   // Called every frame: schedule radio notes just ahead of the playhead.
-  function update(dt, speed, wanted) {
+  // rainLevel is 0 in the dry and 1 in a full storm.
+  function update(dt, speed, wanted, rainLevel) {
     if (!ctx) return;
     const stepDur = 60 / STATIONS[station].bpm / 4;
     while (nextTime < ctx.currentTime + 0.18) {
@@ -161,6 +182,7 @@ export function createAudio() {
         sirenGain.gain.value = 0;
       }
     }
+    if (rainGain) rainGain.gain.value = (rainLevel || 0) * 0.05;
   }
 
   function blip(freqA, freqB, dur, gain) {
@@ -212,6 +234,76 @@ export function createAudio() {
     const t = ctx.currentTime;
     [64, 60, 57, 52].forEach((m, i) => tone(t + i * 0.14, 'sawtooth', midi(m), 0, 0.3, 0.2));
   }
+  function countdown() {
+    // Race countdown tick: one short beep per second.
+    if (!ctx) return;
+    tone(ctx.currentTime, 'sine', 880, 0, 0.12, 0.25);
+  }
+  function raceGo() {
+    // The green light: two high beeps, then nothing but engine.
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    tone(t, 'sine', 1318, 0, 0.14, 0.28);
+    tone(t + 0.14, 'sine', 1318, 0, 0.3, 0.28);
+  }
+  function raceDone() {
+    // Crossing the line: a short rising run, win or lose.
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    [67, 72, 76, 79].forEach((m, i) => tone(t + i * 0.09, 'triangle', midi(m), 0, 0.22, 0.25));
+  }
+  function buy() {
+    // Mara's cash register: two bright notes and a coin sparkle.
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    tone(t, 'triangle', 1568, 0, 0.12, 0.25);
+    tone(t + 0.1, 'triangle', 2093, 0, 0.25, 0.25);
+    noise(t + 0.1, 0.06, 0.12, 8000);
+  }
+  function fare() {
+    // Taxi meter ding: the passenger paid, the meter stops.
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    tone(t, 'triangle', 1046, 0, 0.15, 0.22);
+    tone(t + 0.15, 'triangle', 1318, 0, 0.3, 0.22);
+  }
+  function thunder() {
+    // A storm rumble: a long low noise burst plus a falling bass note.
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    noise(t, 1.2, 0.35, 120);
+    tone(t, 'sine', 80, 30, 1.1, 0.4);
+  }
+  function challenge() {
+    // A goal paid out: a bright two-note chime, higher than the mission done.
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    tone(t, 'triangle', 1174, 0, 0.14, 0.22);
+    tone(t + 0.13, 'triangle', 1568, 0, 0.3, 0.22);
+  }
+  function boost() {
+    // Nitro: a rising whoosh — filtered noise plus a climbing sine.
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    noise(t, 0.5, 0.3, 1200);
+    tone(t, 'sine', 200, 900, 0.5, 0.25);
+  }
+  function pickup() {
+    // A hidden package: two bright rising notes and a coin sparkle.
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    tone(t, 'triangle', 1568, 0, 0.1, 0.22);
+    tone(t + 0.09, 'triangle', 2093, 0, 0.22, 0.22);
+    noise(t + 0.09, 0.05, 0.1, 8000);
+  }
+  function achievement() {
+    // A badge unlocked: a bright rising arpeggio, the game's small fanfare.
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    tone(t, 'triangle', 1046, 0, 0.12, 0.22);
+    tone(t + 0.11, 'triangle', 1318, 0, 0.12, 0.22);
+    tone(t + 0.22, 'triangle', 1568, 0, 0.28, 0.22);
+  }
 
   function nextStation() {
     station = (station + 1) % STATIONS.length;
@@ -230,5 +322,5 @@ export function createAudio() {
     return muted;
   }
 
-  return { unlock, update, blip, punch, crash, fail, horn, win, missionDone, busted, nextStation, stationName, toggleMute, isMuted };
+  return { unlock, update, blip, punch, crash, fail, horn, win, missionDone, busted, countdown, raceGo, raceDone, buy, fare, thunder, challenge, boost, achievement, pickup, nextStation, stationName, toggleMute, isMuted };
 }
