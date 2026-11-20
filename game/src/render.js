@@ -7,6 +7,7 @@ export const SCREEN_TITLE = 'title';
 export const SCREEN_PLAY = 'play';
 export const SCREEN_PAUSED = 'paused';
 export const SCREEN_BUSTED = 'busted';
+export const SCREEN_WON = 'won';
 
 export function createHud(elements) {
   const minimap = elements.minimap.getContext('2d');
@@ -96,6 +97,7 @@ export function createHud(elements) {
     setText(elements.missionTitle, state.won ? 'SOLMARA IS YOURS' : mission.title);
     setText(elements.missionBrief, state.won ? 'The Big Score is done. Free roam — the city is yours.' : mission.brief);
     setText(elements.hint, state.hint);
+    setText(elements.objective, info.objective || '');
     setText(elements.radio, `${info.stationName}${info.muted ? ' (muted)' : ''}`);
     const speed = info.speedKmh;
     setText(elements.speed, info.inCar ? `${speed} km/h` : speed > 0.5 ? 'on foot' : '');
@@ -110,10 +112,24 @@ export function createHud(elements) {
   }
 
   function showOverlay(name) {
-    for (const key of ['title', 'paused', 'busted']) {
+    for (const key of ['title', 'paused', 'busted', 'won']) {
       elements[`${key}Overlay`].classList.toggle('hidden', key !== name);
     }
   }
 
-  return { update, showOverlay };
+  // Fill the win screen: cash, the 7 chapters, cars stolen, punches, rams
+  // and the clock, so the victory reads as a scorecard, not a flag flip.
+  function showWin(state) {
+    const mins = Math.floor(state.time / 60);
+    const secs = Math.floor(state.time % 60);
+    setText(elements.winStats,
+      `$${state.cash} banked · ${state.stats.missionsDone}/7 chapters · ${state.stats.stolen} cars stolen · ${state.stats.punches} punches · ${state.stats.rams} cars rammed · ${mins}:${String(secs).padStart(2, '0')} in the city${state.token.taken ? ' · Golden Token found' : ''}`);
+  }
+
+  // Fill the pause menu with where the run stands.
+  function showPause(statsText) {
+    setText(elements.pausedStats, statsText);
+  }
+
+  return { update, showOverlay, showWin, showPause };
 }

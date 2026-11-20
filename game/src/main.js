@@ -7,14 +7,14 @@
 // window.__shotReady for a screenshot.
 import { SAVE_KEY, STEP } from './config.js';
 import { createRandom } from './random.js';
-import { createWorld, EVENT_BUSTED, EVENT_CASH, EVENT_MISSION, EVENT_PUNCH, EVENT_TOKEN } from './world.js';
+import { createWorld, EVENT_BUSTED, EVENT_CASH, EVENT_CRASH, EVENT_MISSION, EVENT_MISSION_FAIL, EVENT_PUNCH, EVENT_RAM, EVENT_TOKEN, EVENT_WIN } from './world.js';
 import {
-  ACTION_CONFIRM, ACTION_CONTINUE, ACTION_DANCE, ACTION_ENTER, ACTION_MUTE,
+  ACTION_CONFIRM, ACTION_CONTINUE, ACTION_DANCE, ACTION_ENTER, ACTION_HORN, ACTION_MUTE,
   ACTION_PAUSE, ACTION_PUNCH, ACTION_RADIO, createInput,
 } from './input.js';
 import { createCity } from './city.js';
 import { createAudio } from './audio.js';
-import { createHud, SCREEN_BUSTED, SCREEN_PAUSED, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
+import { createHud, SCREEN_BUSTED, SCREEN_PAUSED, SCREEN_PLAY, SCREEN_TITLE, SCREEN_WON } from './render.js';
 import { stageShot } from './shots.js';
 
 const MAX_FRAME = 0.25;
@@ -36,6 +36,7 @@ const hud = createHud({
   wantedLabel: document.getElementById('hud-wanted-label'),
   missionTitle: document.getElementById('hud-mission-title'),
   missionBrief: document.getElementById('hud-mission-brief'),
+  objective: document.getElementById('hud-objective'),
   hint: document.getElementById('hud-hint'),
   radio: document.getElementById('hud-radio'),
   speed: document.getElementById('hud-speed'),
@@ -45,6 +46,9 @@ const hud = createHud({
   titleOverlay: document.getElementById('title-screen'),
   pausedOverlay: document.getElementById('paused-screen'),
   bustedOverlay: document.getElementById('busted-screen'),
+  wonOverlay: document.getElementById('won-screen'),
+  winStats: document.getElementById('win-stats'),
+  pausedStats: document.getElementById('paused-stats'),
 });
 
 function readSave() {
@@ -67,10 +71,25 @@ function writeSave() {
   }
 }
 
+// The objective line: the live timer on a timed point, the ram count on a
+// ram point, nothing otherwise. Module-level so both the live HUD and the
+// screenshot staging share it.
+function missionObjective() {
+  if (world.state.won) return '';
+  const target = world.missionTarget();
+  if (target.ram) return `CARS RAMMED ${world.state.missionRams}/${target.ram}`;
+  if (target.timeLimit && world.state.missionTimer > 0) {
+    const t = Math.max(0, Math.ceil(world.state.missionTimer));
+    return `TIME LEFT ${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+  }
+  return '';
+}
+
 function runShot(name) {
   const staged = stageShot(name, world);
   city.setCameraMode('shot', { shot: name });
-  hud.showOverlay(staged.screen === SCREEN_TITLE ? 'title' : staged.screen === SCREEN_BUSTED ? 'busted' : null);
+  hud.showOverlay(staged.screen === SCREEN_TITLE ? 'title' : staged.screen === SCREEN_BUSTED ? 'busted' : staged.screen === SCREEN_WON ? 'won' : null);
+  if (staged.screen === SCREEN_WON) hud.showWin(world.state);
   const playerCar = world.state.cars.find((c) => c.kind === 'player');
   const info = {
     stationName: audio.stationName(),
@@ -79,6 +98,7 @@ function runShot(name) {
     inCar: !world.state.player.onFoot,
     prompt: '',
     target: world.missionTarget(),
+    objective: missionObjective(),
   };
   hud.update(world.state, info);
   let painted = 0;
@@ -87,7 +107,10 @@ function runShot(name) {
     city.render();
     painted += 1;
     if (painted < 2) requestAnimationFrame(paint);
-    else window.__shotReady = true;
+    else {
+      document.getElementById('loading-screen').classList.add('hidden');
+      window.__shotReady = true;
+    }
   }
   requestAnimationFrame(paint);
 }
@@ -98,12 +121,28 @@ function runGame() {
   let screen = SCREEN_TITLE;
   let accumulator = 0;
   let last = performance.now();
+  let loadingHidden = false;
   // One-shot presses queued for the next simulation step; handleActions takes
   // them once per frame and step() spends them on its first step.
   let queuedActions = 0;
 
   function announce(message) {
     status.textContent = message;
+  }
+
+  function pauseStats() {
+    const s = world.state;
+    const mins = Math.floor(s.time / 60);
+    const secs = Math.floor(s.time % 60);
+    return `Chapter ${s.missionIndex + 1}/7 · $${s.cash} · ${s.wanted === 0 ? 'clean' : `wanted ${s.wanted}`} · ${mins}:${String(secs).padStart(2, '0')} in the city · ${audio.stationName()}`;
+  }
+
+  function pauseGame() {
+    screen = SCREEN_PAUSED;
+    hud.showOverlay('paused');
+    hud.showPause(pauseStats());
+    writeSave();
+    announce('Paused.');
   }
 
   function startGame(continued) {
@@ -135,6 +174,7 @@ function runGame() {
     queuedActions |= actions;
     if (actions & ACTION_MUTE) audio.toggleMute();
     if (actions & ACTION_RADIO) audio.nextStation();
+    if (actions & ACTION_HORN) audio.horn();
     if (screen === SCREEN_TITLE) {
       if (actions & ACTION_RADIO) {
         // The station already advanced above; just name it, so the player
@@ -143,17 +183,19 @@ function runGame() {
       } else if (actions & ACTION_CONTINUE && save) startGame(true);
       else if (actions & ACTION_CONFIRM) startGame(false);
     } else if (screen === SCREEN_PLAY) {
-      if (actions & ACTION_PAUSE) {
-        screen = SCREEN_PAUSED;
-        hud.showOverlay('paused');
-        writeSave();
-        announce('Paused.');
-      }
+      if (actions & ACTION_PAUSE) pauseGame();
     } else if (screen === SCREEN_PAUSED) {
       if (actions & (ACTION_PAUSE | ACTION_CONFIRM)) {
         screen = SCREEN_PLAY;
         hud.showOverlay(null);
         announce('Playing.');
+      }
+    } else if (screen === SCREEN_WON) {
+      if (actions & ACTION_CONFIRM) {
+        // Free roam after the win: the city stays yours.
+        screen = SCREEN_PLAY;
+        hud.showOverlay(null);
+        announce('Free roam. Solmara is yours.');
       }
     } else if (screen === SCREEN_BUSTED) {
       if (actions & ACTION_CONFIRM) {
@@ -204,6 +246,17 @@ function runGame() {
     if (events & EVENT_TOKEN) audio.blip(880, 1320, 0.12, 0.3);
     else if (events & EVENT_CASH) audio.blip(660, 990, 0.08, 0.2);
     if (events & EVENT_PUNCH) audio.punch();
+    if (events & EVENT_RAM) audio.crash();
+    if (events & EVENT_CRASH) audio.crash();
+    if (events & EVENT_MISSION_FAIL) audio.fail();
+    if (events & EVENT_WIN) {
+      audio.win();
+      writeSave();
+      screen = SCREEN_WON;
+      hud.showWin(world.state);
+      hud.showOverlay('won');
+      announce('SOLMARA IS YOURS. Press Enter to keep roaming.');
+    }
     if (events & EVENT_BUSTED) {
       audio.busted();
       writeSave();
@@ -228,6 +281,7 @@ function runGame() {
           ? 'WASD move · Shift run · E steal car · Space punch · F dance'
           : 'WASD drive · E get out · Space punch · F dance · R radio',
       target: world.missionTarget(),
+      objective: missionObjective(),
     };
   }
 
@@ -249,6 +303,10 @@ function runGame() {
     audio.update(STEP, car ? car.speed : 0, world.state.wanted);
     city.sync(STEP);
     city.render();
+    if (!loadingHidden) {
+      loadingHidden = true;
+      document.getElementById('loading-screen').classList.add('hidden');
+    }
     if (screen !== SCREEN_TITLE) hud.update(world.state, hudInfo());
   }
 
@@ -259,12 +317,7 @@ function runGame() {
 
   // Leaving the tab pauses a running game.
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden && screen === SCREEN_PLAY) {
-      screen = SCREEN_PAUSED;
-      hud.showOverlay('paused');
-      writeSave();
-      announce('Paused.');
-    }
+    if (document.hidden && screen === SCREEN_PLAY) pauseGame();
   });
 
   showTitle();

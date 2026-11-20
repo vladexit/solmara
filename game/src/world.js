@@ -6,8 +6,9 @@
 // lamps, signs) is generated once from the seed and never changes.
 import {
   BLOCK, BUILDING_MAX_H, CAR_ACCEL, CAR_MAX_SPEED, CAR_REVERSE, CAR_TURN,
-  CITY_HALF, FEED_POOL, MISSIONS, PITCH, POLICE_SPEED, ROAD, ROAD_COORDS,
-  RUN_SPEED, START_CASH, TOKEN_SPOT, WALK_SPEED,
+  CITY_HALF, FEED_POOL, MISSIONS, PED_COUNT, PITCH, POLICE_SPEED,
+  POLICE_TOP_SPEED, ROAD, ROAD_COORDS, RUN_SPEED, START_CASH, TOKEN_SPOT,
+  TRAFFIC_COUNT, WALK_SPEED,
 } from './config.js';
 
 export const EVENT_MISSION = 1;
@@ -17,6 +18,9 @@ export const EVENT_WANTED = 8;
 export const EVENT_CASH = 16;
 export const EVENT_PUNCH = 32;
 export const EVENT_WIN = 64;
+export const EVENT_MISSION_FAIL = 128;
+export const EVENT_RAM = 256;
+export const EVENT_CRASH = 512;
 
 const CAR_COLORS = [0xd8d8e0, 0x3a6fd8, 0xd83a3a, 0x3ad8a0, 0xe0a53a, 0x8a5ad8, 0x222226, 0xd8d8d8];
 const PED_COLORS = [0xe0a53a, 0x3a6fd8, 0xd83a7a, 0x3ad8a0, 0xe8e8e8, 0x8a5ad8, 0x5ad8d8];
@@ -94,7 +98,57 @@ export function createWorld(random) {
   signs.push({ x: 120, z: 68, y: 16, w: 34, h: 7, text: "MOMO'S CIRCUS", color: '#ff5a3c' });
   signs.push({ x: -60, z: -128, y: 12, w: 44, h: 7, text: 'SAME SPOT, YEARS APART', color: '#7dff5a' });
   signs.push({ x: 180, z: -68, y: 15, w: 30, h: 6, text: 'MARA\u2019S GARAGE', color: '#ff2e88' });
-  const city = { buildings, trees, lamps, signs };
+  // Ground fill, round 3: the blocks were bare concrete. Props sit on the
+  // 2 m sidewalk band between the road edge and the block (never inside a
+  // building footprint), and grass/plaza plots break up the flat ground.
+  const props = [];
+  const plots = [];
+  for (let ix = 0; ix < ROAD_COORDS.length - 1; ix += 1) {
+    for (let iz = 0; iz < ROAD_COORDS.length - 1; iz += 1) {
+      const x0 = ROAD_COORDS[ix] + ROAD / 2;
+      const z0 = ROAD_COORDS[iz] + ROAD / 2;
+      const cx = x0 + BLOCK / 2;
+      const cz = z0 + BLOCK / 2;
+      // The central plaza: grass plots and benches around the Golden Token.
+      if (ix === 3 && iz === 3) {
+        plots.push({ x: cx - 16, z: cz - 16, w: 12, h: 9, kind: 'grass' });
+        plots.push({ x: cx + 4, z: cz - 16, w: 12, h: 9, kind: 'grass' });
+        plots.push({ x: cx - 16, z: cz + 7, w: 12, h: 9, kind: 'grass' });
+        plots.push({ x: cx + 4, z: cz + 7, w: 12, h: 9, kind: 'grass' });
+        plots.push({ x: cx - 8, z: cz - 8, w: 16, h: 16, kind: 'plaza' });
+        props.push({ x: cx - 18, z: cz, kind: 'bench', rot: Math.PI / 2 });
+        props.push({ x: cx + 18, z: cz, kind: 'bench', rot: -Math.PI / 2 });
+        props.push({ x: cx, z: cz - 18, kind: 'bench', rot: 0 });
+        props.push({ x: cx, z: cz + 18, kind: 'bench', rot: Math.PI });
+        continue;
+      }
+      // The marina corner: a promenade plot with benches facing the water.
+      if (ix === 0 && iz === 6) {
+        plots.push({ x: cx - 18, z: cz - 6, w: 36, h: 12, kind: 'plaza' });
+        props.push({ x: cx - 12, z: cz + 8, kind: 'bench', rot: Math.PI });
+        props.push({ x: cx + 12, z: cz + 8, kind: 'bench', rot: Math.PI });
+        continue;
+      }
+      // A random block sometimes gets a small grass plot.
+      if (random.next() < 0.22) {
+        plots.push({ x: cx - 5 + random.range(-8, 8), z: cz - 4 + random.range(-8, 8), w: 10, h: 8, kind: 'grass' });
+      }
+      // Benches on the west sidewalk band, hydrants on corners, bins by benches.
+      if (random.next() < 0.55) {
+        const bx = x0 + 1;
+        const bz = z0 + 4 + random.range(0, BLOCK - 8);
+        props.push({ x: bx, z: bz, kind: 'bench', rot: Math.PI / 2 });
+        if (random.next() < 0.6) props.push({ x: bx + 1.5, z: bz + 3, kind: 'bin', rot: 0 });
+      }
+      if (random.next() < 0.35) {
+        props.push({ x: x0 + 1, z: z0 + 1, kind: 'hydrant', rot: 0 });
+      }
+      if (random.next() < 0.3) {
+        props.push({ x: x0 + BLOCK - 1, z: z0 + BLOCK - 1, kind: 'hydrant', rot: 0 });
+      }
+    }
+  }
+  const city = { buildings, trees, lamps, signs, props, plots };
 
   // ---- dynamic state ----
   const state = {
@@ -109,6 +163,8 @@ export function createWorld(random) {
     won: false,
     missionIndex: 0,
     missionPoint: 0,
+    missionTimer: 0,
+    missionRams: 0,
     hint: '',
     hintTimer: 0,
     token: { x: TOKEN_SPOT.x, z: TOKEN_SPOT.z, taken: false },
@@ -120,16 +176,23 @@ export function createWorld(random) {
     cars: [],
     peds: [],
     police: [],
-    stats: { stolen: 0, punches: 0, missionsDone: 0 },
+    stats: { stolen: 0, punches: 0, missionsDone: 0, rams: 0 },
   };
 
   let carSeq = 0;
   function makeCar(kind, x, z, heading, color) {
     return {
       id: carSeq++, kind, x, z, heading, speed: 0, color,
+      // Round 3: every car handles a little differently — a stolen coupe is
+      // never quite the same car twice.
+      tune: 0.9 + random.range(0, 0.25),
       // traffic lane-following
       axis: 'x', coord: nearestRoadCoord(z), dir: 1, s: x,
       wheelSpin: 0, brake: false,
+      // Ram feedback: lateral shove and wobble decay back to the lane.
+      lat: 0, wobble: 0, rammedAt: -99,
+      // Police extras: a per-car speed jitter and the roadblock flag.
+      jitter: random.range(-1, 1), roadblock: false,
     };
   }
   // The player's car, looked up by id: array indices shift when police despawn.
@@ -159,27 +222,37 @@ export function createWorld(random) {
     state.won = false;
     state.missionIndex = 0;
     state.missionPoint = 0;
+    state.missionTimer = 0;
+    state.missionRams = 0;
     state.hint = '';
     state.hintTimer = 0;
     state.token = { x: TOKEN_SPOT.x, z: TOKEN_SPOT.z, taken: false };
     state.feed = [];
-    state.stats = { stolen: 0, punches: 0, missionsDone: 0 };
+    state.stats = { stolen: 0, punches: 0, missionsDone: 0, rams: 0 };
     const p = state.player;
     p.x = 24; p.z = 40; p.heading = Math.PI; p.speed = 0;
     p.onFoot = true; p.carId = -1; p.walkPhase = 0; p.punchTimer = 0; p.danceTimer = 0; p.moving = false;
-    // Parked cars, including the red coupe for the Chapter 2 mission.
-    state.cars = [
-      makeCar('parked', 60, -14, 0, 0xd83a3a),
-      makeCar('parked', -58, 26, Math.PI / 2, 0x3a6fd8),
-      makeCar('parked', 122, -58, -Math.PI / 2, 0xe0a53a),
-      makeCar('parked', -122, -122, 0, 0xd8d8e0),
-      makeCar('parked', 178, 122, Math.PI, 0x3ad8a0),
-      makeCar('parked', 26, 178, Math.PI / 2, 0x222226),
-      makeCar('parked', -178, 58, 0, 0x8a5ad8),
-      makeCar('parked', 58, 122, -Math.PI / 2, 0xd8d8d8),
-    ];
+    // Parked cars, including the red coupe for the Chapter 2 mission. The
+    // row is shuffled per seed so the street never parks the same way twice.
+    const parkedSpots = random.shuffle([
+      [60, -14, 0, 0xd83a3a],
+      [-58, 26, Math.PI / 2, 0x3a6fd8],
+      [122, -58, -Math.PI / 2, 0xe0a53a],
+      [-122, -122, 0, 0xd8d8e0],
+      [178, 122, Math.PI, 0x3ad8a0],
+      [26, 178, Math.PI / 2, 0x222226],
+      [-178, 58, 0, 0x8a5ad8],
+      [58, 122, -Math.PI / 2, 0xd8d8d8],
+      [-62, -58, 0, 0xd8d8e0],
+      [118, 62, Math.PI, 0x3a6fd8],
+      [-182, 118, Math.PI / 2, 0xe0a53a],
+      [182, -122, -Math.PI / 2, 0x8a5ad8],
+      [-118, 178, 0, 0x3ad8a0],
+      [62, 182, Math.PI, 0xd83a3a],
+    ]);
+    state.cars = parkedSpots.map(([x, z, heading, color]) => makeCar('parked', x, z, heading, color));
     // Traffic: lane followers on the road grid.
-    for (let i = 0; i < 14; i += 1) {
+    for (let i = 0; i < TRAFFIC_COUNT; i += 1) {
       const axis = random.next() < 0.5 ? 'x' : 'z';
       const coord = ROAD_COORDS[random.int(0, ROAD_COORDS.length - 1)];
       const dir = random.next() < 0.5 ? 1 : -1;
@@ -192,22 +265,26 @@ export function createWorld(random) {
       car.speed = random.range(7, 11);
       state.cars.push(car);
     }
-    // Pedestrians on the sidewalks.
+    // Pedestrians on the sidewalks: walkers, joggers and idlers standing
+    // around chatting, so the street reads as lived-in instead of a parade.
     state.peds = [];
-    for (let i = 0; i < 18; i += 1) {
+    for (let i = 0; i < PED_COUNT; i += 1) {
       const bx = ROAD_COORDS[random.int(0, ROAD_COORDS.length - 2)];
       const bz = ROAD_COORDS[random.int(0, ROAD_COORDS.length - 2)];
+      const roll = random.next();
+      const mode = roll < 0.6 ? 'walk' : roll < 0.85 ? 'jog' : 'idle';
       state.peds.push({
         x: bx + ROAD / 2 + 2 + random.range(0, BLOCK),
         z: bz + ROAD / 2 + 2 + random.range(0, BLOCK),
         heading: random.range(0, Math.PI * 2),
-        speed: random.range(1.2, 2.2),
+        speed: mode === 'jog' ? random.range(3.2, 4.4) : random.range(1.2, 2.2),
         color: PED_COLORS[random.int(0, PED_COLORS.length - 1)],
-        mode: 'walk', fleeTimer: 0, tx: 0, tz: 0, walkPhase: random.range(0, 6),
+        mode, fleeTimer: 0, tx: 0, tz: 0, walkPhase: random.range(0, 6),
         downTimer: 0,
       });
     }
     state.police = [];
+    enterPoint();
     pushFeed('@NeonRowNews', 'Welcome to Solmara. New in town? Mara Voss is waiting at the garage.');
   }
 
@@ -256,6 +333,14 @@ export function createWorld(random) {
     return m.points[Math.min(state.missionPoint, m.points.length - 1)];
   }
 
+  // Arm the current point: a timed point starts its countdown, a ram point
+  // starts its counter at zero. Called whenever the mission or point changes.
+  function enterPoint() {
+    const target = missionTarget();
+    state.missionTimer = target.timeLimit || 0;
+    state.missionRams = 0;
+  }
+
   function addWanted(n, events) {
     if (state.wanted < 5) {
       state.wanted = Math.min(5, state.wanted + n);
@@ -291,14 +376,17 @@ export function createWorld(random) {
       }
       if (car.s > 195) { car.s = -195; }
       if (car.s < -195) { car.s = 195; }
+      // A rammed car slides sideways and wobbles back onto its lane.
+      car.lat *= Math.max(0, 1 - 2.2 * dt);
+      car.wobble *= Math.max(0, 1 - 2.5 * dt);
       if (car.axis === 'x') {
         car.x = car.s;
-        car.z = car.coord + (car.dir > 0 ? 3.5 : -3.5);
-        car.heading = car.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
+        car.z = car.coord + (car.dir > 0 ? 3.5 : -3.5) + car.lat;
+        car.heading = (car.dir > 0 ? Math.PI / 2 : -Math.PI / 2) + car.wobble;
       } else {
         car.z = car.s;
-        car.x = car.coord + (car.dir > 0 ? 3.5 : -3.5);
-        car.heading = car.dir > 0 ? 0 : Math.PI;
+        car.x = car.coord + (car.dir > 0 ? 3.5 : -3.5) + car.lat;
+        car.heading = (car.dir > 0 ? 0 : Math.PI) + car.wobble;
       }
       car.wheelSpin += car.speed * dt * 1.4;
     }
@@ -319,8 +407,13 @@ export function createWorld(random) {
         ped.z += Math.cos(a) * 6.5 * dt;
         ped.walkPhase += dt * 14;
         if (ped.fleeTimer <= 0) ped.mode = 'walk';
+      } else if (ped.mode === 'idle') {
+        // Standing around chatting: slow turn, occasional small step.
+        ped.heading += dt * 0.4;
+        ped.walkPhase += dt * 1.5;
+        if (random.next() < 0.002) ped.mode = 'walk';
       } else {
-        // Walk toward a sidewalk waypoint; pick a new one on arrival.
+        // Walk or jog toward a sidewalk waypoint; pick a new one on arrival.
         if (Math.hypot(ped.tx - ped.x, ped.tz - ped.z) < 2 || (ped.tx === 0 && ped.tz === 0)) {
           const bx = ROAD_COORDS[random.int(0, ROAD_COORDS.length - 2)];
           const bz = ROAD_COORDS[random.int(0, ROAD_COORDS.length - 2)];
@@ -331,7 +424,7 @@ export function createWorld(random) {
         ped.heading += clampAngle(a - ped.heading) * Math.min(1, dt * 4);
         ped.x += Math.sin(ped.heading) * ped.speed * dt;
         ped.z += Math.cos(ped.heading) * ped.speed * dt;
-        ped.walkPhase += dt * 7;
+        ped.walkPhase += dt * (ped.mode === 'jog' ? 12 : 7);
       }
       const fixed = collideBuildings(ped.x, ped.z, 0.6);
       ped.x = fixed.x;
@@ -347,13 +440,37 @@ export function createWorld(random) {
     }
   }
 
+  // A waypoint on the road grid from (x, z) toward (tx, tz): drive along the
+  // current road to the crossing road nearest the target, then along that road.
+  // Police use it to chase through the grid instead of beelining through blocks.
+  function roadWaypoint(x, z, tx, tz) {
+    const onXRoad = Math.abs(x - nearestRoadCoord(x)) < 3.5;
+    const onZRoad = Math.abs(z - nearestRoadCoord(z)) < 3.5;
+    if (onXRoad && !onZRoad) {
+      const zr = nearestRoadCoord(tz);
+      if (Math.abs(z - zr) > 6) return { x, z: zr };
+      return { x: tx, z: zr };
+    }
+    if (onZRoad && !onXRoad) {
+      const xr = nearestRoadCoord(tx);
+      if (Math.abs(x - xr) > 6) return { x: xr, z };
+      return { x: xr, z: tz };
+    }
+    if (onXRoad && onZRoad) {
+      if (Math.abs(tx - x) > Math.abs(tz - z)) return { x: tx, z };
+      return { x, z: tz };
+    }
+    return { x: nearestRoadCoord(x), z: nearestRoadCoord(z) };
+  }
+
   function stepPolice(dt) {
     const p = state.player;
     const pcar = playerCar();
     const px = p.onFoot ? p.x : (pcar ? pcar.x : p.x);
     const pz = p.onFoot ? p.z : (pcar ? pcar.z : p.z);
     const want = state.wanted === 0 ? 0 : state.wanted <= 1 ? 1 : state.wanted <= 2 ? 2 : state.wanted <= 3 ? 3 : 4;
-    while (state.police.length < want) {
+    const chasers = state.police.filter((c) => !c.roadblock);
+    while (chasers.length < want) {
       const axis = random.next() < 0.5 ? 'x' : 'z';
       const coord = nearestRoadCoord(axis === 'x' ? pz : px);
       const dir = random.next() < 0.5 ? 1 : -1;
@@ -366,17 +483,57 @@ export function createWorld(random) {
       car.speed = POLICE_SPEED;
       state.police.push(car);
       state.cars.push(car);
+      chasers.push(car);
     }
-    while (state.police.length > want) {
-      const car = state.police.pop();
-      const i = state.cars.indexOf(car);
+    while (chasers.length > want) {
+      const car = chasers.pop();
+      let i = state.police.indexOf(car);
+      if (i >= 0) state.police.splice(i, 1);
+      i = state.cars.indexOf(car);
       if (i >= 0) state.cars.splice(i, 1);
+    }
+    // Roadblocks at wanted 3+: two parked cruisers across the road ahead of
+    // the player, so a straight-line escape runs into a wall. They vanish
+    // once the heat drops.
+    const blocks = state.police.filter((c) => c.roadblock);
+    if (state.wanted >= 3) {
+      while (blocks.length < 2) {
+        const ahead = 45 + blocks.length * 14;
+        const ax = px + Math.sin(p.heading) * ahead;
+        const az = pz + Math.cos(p.heading) * ahead;
+        const onXRoad = Math.abs(pz - nearestRoadCoord(pz)) < Math.abs(px - nearestRoadCoord(px));
+        const coord = nearestRoadCoord(onXRoad ? pz : px);
+        const bx = onXRoad ? ax : coord + (blocks.length === 0 ? -3.5 : 3.5);
+        const bz = onXRoad ? coord + (blocks.length === 0 ? -3.5 : 3.5) : az;
+        const car = makeCar('police', clampCity(bx), clampCity(bz), onXRoad ? 0 : Math.PI / 2, 0x1a2a6b);
+        car.roadblock = true;
+        car.speed = 0;
+        state.police.push(car);
+        state.cars.push(car);
+        blocks.push(car);
+      }
+    } else {
+      for (const car of blocks) {
+        let i = state.police.indexOf(car);
+        if (i >= 0) state.police.splice(i, 1);
+        i = state.cars.indexOf(car);
+        if (i >= 0) state.cars.splice(i, 1);
+      }
     }
     let near = false;
     for (const car of state.police) {
-      const a = angleTo(car.x, car.z, px, pz);
-      car.heading += clampAngle(a - car.heading) * Math.min(1, dt * 2.2);
-      const target = POLICE_SPEED + state.wanted * 0.8;
+      if (car.roadblock) {
+        const d = Math.hypot(car.x - px, car.z - pz);
+        if (d < 6) near = true;
+        continue;
+      }
+      // Chase through the road grid: steer at the next grid waypoint, not at
+      // the player through buildings.
+      const wp = roadWaypoint(car.x, car.z, px, pz);
+      const a = angleTo(car.x, car.z, wp.x, wp.z);
+      car.heading += clampAngle(a - car.heading) * Math.min(1, dt * 3.2);
+      // Wanted 4-5: the police are faster than the player's car.
+      const target = (state.wanted >= 4 ? POLICE_TOP_SPEED : POLICE_SPEED + state.wanted * 0.8) + car.jitter;
       car.speed += Math.max(-18 * dt, Math.min(10 * dt, target - car.speed));
       car.x += Math.sin(car.heading) * car.speed * dt;
       car.z += Math.cos(car.heading) * car.speed * dt;
@@ -471,11 +628,13 @@ export function createWorld(random) {
           }
         }
       } else if (car) {
-        // Driving: y = throttle, x = steering.
+        // Driving: y = throttle, x = steering. Each stolen car is tuned a
+        // little differently, so the top speed is the car's, not the city's.
+        const maxSpeed = CAR_MAX_SPEED * (car.tune || 1);
         if (input.y > 0) car.speed += CAR_ACCEL * dt;
         else if (input.y < 0) car.speed -= (car.speed > 0.5 ? CAR_ACCEL * 1.4 : CAR_REVERSE) * dt;
         else car.speed -= Math.sign(car.speed) * Math.min(Math.abs(car.speed), 8 * dt);
-        car.speed = Math.max(-CAR_REVERSE, Math.min(CAR_MAX_SPEED, car.speed));
+        car.speed = Math.max(-CAR_REVERSE, Math.min(maxSpeed, car.speed));
         const steer = input.x * CAR_TURN * Math.min(1, Math.abs(car.speed) / 8);
         car.heading += steer * Math.sign(car.speed) * dt;
         car.x += Math.sin(car.heading) * car.speed * dt;
@@ -486,6 +645,7 @@ export function createWorld(random) {
         if (fixed.hit && Math.abs(car.speed) > 6) {
           car.speed *= 0.4;
           state.health = Math.max(0, state.health - 2);
+          events |= EVENT_CRASH;
         }
         car.x = fixed.x;
         car.z = fixed.z;
@@ -494,6 +654,43 @@ export function createWorld(random) {
         p.x = car.x;
         p.z = car.z;
         p.heading = car.heading;
+        // Ramming traffic: a fast hit shoves the other car sideways, slows
+        // you down, and counts toward a ram objective when one is current.
+        if (Math.abs(car.speed) > 4) {
+          for (const other of state.cars) {
+            if (other.kind !== 'traffic' || other === car) continue;
+            if (state.time - other.rammedAt < 2) continue;
+            if (dist2(car.x, car.z, other.x, other.z) < 7) {
+              other.rammedAt = state.time;
+              other.lat = random.next() < 0.5 ? 3 : -3;
+              other.wobble = random.next() < 0.5 ? 0.5 : -0.5;
+              other.speed *= 0.4;
+              car.speed *= 0.75;
+              events |= EVENT_RAM;
+              state.stats.rams += 1;
+              const target = missionTarget();
+              if (!state.won && target.ram) {
+                state.missionRams += 1;
+                if (state.missionRams >= target.ram) {
+                  state.hint = 'Convoy smashed. Grab the cash!';
+                  state.hintTimer = 3;
+                }
+              }
+            }
+          }
+          // A roadblock is a wall, not a bump: hitting one stops the car.
+          for (const block of state.police) {
+            if (!block.roadblock) continue;
+            if (dist2(car.x, car.z, block.x, block.z) < 10) {
+              car.speed *= 0.3;
+              state.health = Math.max(0, state.health - 3);
+              events |= EVENT_CRASH;
+              const push = angleTo(block.x, block.z, car.x, car.z);
+              car.x += Math.sin(push) * 1.2;
+              car.z += Math.cos(push) * 1.2;
+            }
+          }
+        }
         if (input.enter) {
           // Get out beside the car.
           p.onFoot = true;
@@ -521,7 +718,27 @@ export function createWorld(random) {
         const px = p.x;
         const pz = p.z;
         const d = Math.hypot(target.x - px, target.z - pz);
-        if (d < 8) {
+        // A timed point runs its clock down; missing the deadline fails the
+        // mission back to its first point and costs $50.
+        let failed = false;
+        if (target.timeLimit && state.missionTimer > 0) {
+          state.missionTimer -= dt;
+          if (state.missionTimer <= 0) {
+            state.missionTimer = 0;
+            state.missionPoint = 0;
+            state.cash = Math.max(0, state.cash - 50);
+            state.hint = 'Too slow — the deal moved on. Mara gives you one more shot.';
+            state.hintTimer = 4;
+            events |= EVENT_MISSION_FAIL;
+            pushFeed('@MaraVoss', 'Clock ran out. The city does not wait. Run it again.');
+            enterPoint();
+            failed = true;
+          }
+        }
+        // A ram point clears only when enough escort cars are smashed near it.
+        const ramDone = !target.ram || state.missionRams >= target.ram;
+        const closeEnough = target.ram ? d < 14 : d < 8;
+        if (!failed && ramDone && closeEnough) {
           const m = currentMission();
           if (m.needCar && p.onFoot) {
             state.hint = 'You need a car for this. Press E beside one to take it.';
@@ -545,6 +762,7 @@ export function createWorld(random) {
                 pushFeed('@NeonRowNews', 'THE BIG SCORE! Someone just took the vault. Solmara has a new name.');
               }
             }
+            enterPoint();
           }
         }
       }
@@ -619,6 +837,7 @@ export function createWorld(random) {
     state.missionIndex = Math.min(save.missionIndex ?? 0, MISSIONS.length - 1);
     state.missionPoint = 0;
     if (save.tokenTaken) state.token.taken = true;
+    enterPoint();
   }
 
   reset();

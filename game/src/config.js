@@ -20,11 +20,21 @@ export const CAR_MAX_SPEED = 27;
 export const CAR_REVERSE = 9;
 export const CAR_TURN = 2.4;
 export const POLICE_SPEED = 17;
+// At wanted 4-5 the police outrun the player's car: the chase stops being
+// an escort and starts being a threat.
+export const POLICE_TOP_SPEED = 29;
+
+// City life, round 3: a visibly busier city than round 2 (14 traffic, 18 peds).
+export const TRAFFIC_COUNT = 28;
+export const PED_COUNT = 36;
 
 export const START_CASH = 60;
 
 // Missions: a point (or a list of points in order) the player must reach. needCar
 // means the point only counts while driving. onArrive runs when a point is reached.
+// A point may also carry a timeLimit (seconds left to reach it once it becomes
+// current) or a ram count (traffic cars to smash near the point before it clears):
+// round 3 adds timed runs and a ramming objective next to the plain reach points.
 export const MISSIONS = [
   {
     title: 'Chapter 1 — New in Town',
@@ -44,11 +54,11 @@ export const MISSIONS = [
   },
   {
     title: 'Chapter 3 — The 10-Day Contract',
-    brief: 'The Contract: hit all three checkpoints across Solmara. Ten days of work, one night of driving.',
+    brief: 'The Contract: hit all three checkpoints across Solmara — 60 seconds per stop. Ten days of work, one night of driving.',
     points: [
-      { x: -180, z: -120 },
-      { x: 180, z: 60 },
-      { x: -60, z: 180 },
+      { x: -180, z: -120, timeLimit: 60 },
+      { x: 180, z: 60, timeLimit: 60 },
+      { x: -60, z: 180, timeLimit: 60 },
     ],
     needCar: true,
     reward: 300,
@@ -75,17 +85,17 @@ export const MISSIONS = [
   },
   {
     title: 'Chapter 6 — Neon Row Delivery',
-    brief: 'Deliver the package to the far corner of town. Fast, quiet, no cops.',
-    points: [{ x: -180, z: -180 }],
+    brief: 'Deliver the package to the far corner of town. 75 seconds on the clock. Fast, quiet, no cops.',
+    points: [{ x: -180, z: -180, timeLimit: 75 }],
     needCar: true,
     reward: 350,
     arrive: 'Delivered. No questions, no names. That is how Solmara works.',
   },
   {
     title: 'Chapter 7 — The Big Score',
-    brief: 'Hit the vault under the old bank, grab the cash, then escape to the Marina.',
+    brief: 'Ram the vault convoy — smash 3 escort cars at the old bank — grab the cash, then escape to the Marina.',
     points: [
-      { x: 0, z: -180, wanted: 3 },
+      { x: 0, z: -180, wanted: 3, ram: 3 },
       { x: -180, z: 180 },
     ],
     needCar: true,

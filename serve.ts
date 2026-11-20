@@ -69,4 +69,11 @@ createServer((request, response) => {
   createReadStream(file).pipe(response);
 }).listen(port, '127.0.0.1', () => {
   console.log(`game/ is on http://localhost:${port}`);
+  console.log('screenshot scenes (seed 1):');
+  for (const [name, query] of [
+    ['1-start.jpg', '?shot=start&seed=1'],
+    ['2-play.jpg', '?shot=play&seed=1'],
+    ['3-chase.jpg', '?shot=chase&seed=1'],
+    ['4-busted.jpg', '?shot=busted&seed=1'],
+  ]) console.log(`  ${name}  http://localhost:${port}/${query}`);
 });

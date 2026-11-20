@@ -9,6 +9,7 @@ export const ACTION_DANCE = 16;
 export const ACTION_RADIO = 32;
 export const ACTION_MUTE = 64;
 export const ACTION_CONTINUE = 128;
+export const ACTION_HORN = 256;
 
 const KEY_ACTIONS = {
   Enter: ACTION_CONFIRM,
@@ -20,6 +21,7 @@ const KEY_ACTIONS = {
   KeyC: ACTION_CONTINUE,
   KeyP: ACTION_PAUSE,
   Escape: ACTION_PAUSE,
+  KeyH: ACTION_HORN,
 };
 
 export function createInput(canvas) {

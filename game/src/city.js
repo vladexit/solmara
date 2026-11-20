@@ -45,24 +45,47 @@ function facadeTexture(seed, base) {
   });
 }
 
+function sidewalkTexture(seed, base, grout) {
+  return canvasTexture(128, 128, (g, w, h) => {
+    g.fillStyle = base;
+    g.fillRect(0, 0, w, h);
+    // Pavement tiles with grout lines and a few stains, so no two blocks
+    // read as the same flat slab.
+    g.strokeStyle = grout;
+    g.lineWidth = 2;
+    for (let i = 0; i <= 4; i += 1) {
+      g.beginPath(); g.moveTo((i * w) / 4, 0); g.lineTo((i * w) / 4, h); g.stroke();
+      g.beginPath(); g.moveTo(0, (i * h) / 4); g.lineTo(w, (i * h) / 4); g.stroke();
+    }
+    for (let i = 0; i < 14; i += 1) {
+      const v = hashInt(seed * 31 + i * 7);
+      g.fillStyle = v < 0.5 ? 'rgba(0,0,0,0.12)' : 'rgba(255,255,255,0.05)';
+      g.fillRect((v * 97) % w, ((v * 53) % h), 12 + v * 20, 8 + v * 14);
+    }
+  });
+}
+
 function roadTexture() {
-  const tex = canvasTexture(64, 256, (g, w, h) => {
+  // 256x64 tile: the dashes run along u (the road's length) and the tile
+  // repeats 24 times down a 470 m strip, so a dash is ~5 m with a ~15 m
+  // gap — the round-2 repeat (1,14) squeezed the tile across the road
+  // instead and read as corduroy.
+  const tex = canvasTexture(256, 64, (g, w, h) => {
     g.fillStyle = '#464b57';
     g.fillRect(0, 0, w, h);
     g.fillStyle = 'rgba(255,255,255,0.07)';
-    for (let i = 0; i < 200; i += 1) {
+    for (let i = 0; i < 120; i += 1) {
       g.fillRect(((i * 37) % w), ((i * 91) % h), 2, 2);
     }
     g.fillStyle = '#d8c25a';
-    g.fillRect(w / 2 - 1, 8, 2, 34);
-    g.fillRect(w / 2 - 1, 136, 2, 34);
+    g.fillRect(0, h / 2 - 2, 64, 4);
     g.fillStyle = 'rgba(230,230,230,0.75)';
-    g.fillRect(3, 0, 2, h);
-    g.fillRect(w - 5, 0, 2, h);
+    g.fillRect(0, 3, w, 2);
+    g.fillRect(0, h - 5, w, 2);
   });
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(1, 14);
+  tex.repeat.set(24, 1);
   return tex;
 }
 
@@ -94,23 +117,49 @@ function glowTexture() {
   });
 }
 
-function makeCarMesh(color, isPolice) {
+function makeCarMesh(color, isPolice, style) {
   const group = new THREE.Group();
   const bodyMat = new THREE.MeshLambertMaterial({ color: isPolice ? 0xe8e8e8 : color });
   const glassMat = new THREE.MeshLambertMaterial({ color: 0x0e1420, emissive: 0x0a0e18 });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.85, 4.4), bodyMat);
-  body.position.y = 0.62;
+  // Three silhouettes instead of one box: 0 sedan, 1 hatchback (shorter,
+  // taller cabin), 2 sporty (lower, wider stance, rear spoiler).
+  const bodyLen = style === 1 ? 3.6 : 4.4;
+  const bodyH = style === 2 ? 0.7 : 0.85;
+  const bodyY = style === 2 ? 0.55 : 0.62;
+  const body = new THREE.Mesh(new THREE.BoxGeometry(2.0, bodyH, bodyLen), bodyMat);
+  body.position.y = bodyY;
   body.castShadow = true;
   group.add(body);
-  const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.7, 2.2), glassMat);
-  cabin.position.set(0, 1.32, -0.25);
+  const cabinLen = style === 1 ? 2.0 : 2.2;
+  const cabinH = style === 1 ? 0.8 : 0.7;
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.7, cabinH, cabinLen), glassMat);
+  cabin.position.set(0, bodyY + bodyH / 2 + cabinH / 2 - 0.05, style === 1 ? 0.1 : -0.25);
   cabin.castShadow = true;
   group.add(cabin);
+  // Bumpers front and rear, so the body is not one flat slab.
+  const bumperMat = new THREE.MeshLambertMaterial({ color: 0x1c1f26 });
+  for (const bz of [bodyLen / 2 - 0.05, -bodyLen / 2 + 0.05]) {
+    const bumper = new THREE.Mesh(new THREE.BoxGeometry(2.02, 0.22, 0.18), bumperMat);
+    bumper.position.set(0, 0.42, bz);
+    group.add(bumper);
+  }
+  if (style === 2) {
+    const spoiler = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.07, 0.5), bumperMat);
+    spoiler.position.set(0, bodyY + bodyH / 2 + 0.32, -bodyLen / 2 + 0.35);
+    spoiler.castShadow = true;
+    group.add(spoiler);
+    for (const sx of [-0.7, 0.7]) {
+      const strut = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.3, 0.08), bumperMat);
+      strut.position.set(sx, bodyY + bodyH / 2 + 0.16, -bodyLen / 2 + 0.35);
+      group.add(strut);
+    }
+  }
   const wheelGeo = new THREE.CylinderGeometry(0.42, 0.42, 0.32, 12);
   wheelGeo.rotateZ(Math.PI / 2);
   const wheelMat = new THREE.MeshLambertMaterial({ color: 0x111111 });
   const wheels = [];
-  for (const [wx, wz] of [[-0.95, 1.45], [0.95, 1.45], [-0.95, -1.45], [0.95, -1.45]]) {
+  const halfLen = bodyLen / 2 - 0.75;
+  for (const [wx, wz] of [[-0.95, halfLen], [0.95, halfLen], [-0.95, -halfLen], [0.95, -halfLen]]) {
     const wheel = new THREE.Mesh(wheelGeo, wheelMat);
     wheel.position.set(wx, 0.42, wz);
     wheel.castShadow = true;
@@ -120,13 +169,13 @@ function makeCarMesh(color, isPolice) {
   const headMat = new THREE.MeshBasicMaterial({ color: 0xfff2b0 });
   for (const wx of [-0.65, 0.65]) {
     const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.18, 0.08), headMat);
-    lamp.position.set(wx, 0.72, 2.22);
+    lamp.position.set(wx, 0.72, bodyLen / 2 + 0.02);
     group.add(lamp);
   }
   const tailMat = new THREE.MeshBasicMaterial({ color: 0xff2a2a });
   for (const wx of [-0.65, 0.65]) {
     const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.18, 0.08), tailMat);
-    lamp.position.set(wx, 0.72, -2.22);
+    lamp.position.set(wx, 0.72, -bodyLen / 2 - 0.02);
     group.add(lamp);
   }
   let barRed = null;
@@ -217,7 +266,7 @@ export function createCity(canvas, state, getMissionTarget) {
   // Lights: warm low sun + purple dusk sky bounce.
   const sun = new THREE.DirectionalLight(0xff9a5c, 1.7);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(1024, 1024);
+  sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.camera.left = -90;
   sun.shadow.camera.right = 90;
   sun.shadow.camera.top = 90;
@@ -254,17 +303,116 @@ export function createCity(canvas, state, getMissionTarget) {
     stripZ.receiveShadow = true;
     scene.add(stripZ);
   }
-  const walkMat = new THREE.MeshLambertMaterial({ color: 0x4a5160 });
+  const walkMats = [
+    new THREE.MeshLambertMaterial({ map: sidewalkTexture(3, '#4a5160', '#3a4150') }),
+    new THREE.MeshLambertMaterial({ map: sidewalkTexture(17, '#525a68', '#414856') }),
+    new THREE.MeshLambertMaterial({ map: sidewalkTexture(29, '#454c5a', '#363d49') }),
+  ];
   for (let ix = 0; ix < ROAD_COORDS.length - 1; ix += 1) {
     for (let iz = 0; iz < ROAD_COORDS.length - 1; iz += 1) {
       const x0 = ROAD_COORDS[ix] + ROAD / 2;
       const z0 = ROAD_COORDS[iz] + ROAD / 2;
-      const walk = new THREE.Mesh(new THREE.PlaneGeometry(BLOCK + 4, BLOCK + 4), walkMat);
+      const walk = new THREE.Mesh(new THREE.PlaneGeometry(BLOCK + 4, BLOCK + 4), walkMats[(ix + iz) % 3]);
       walk.rotation.x = -Math.PI / 2;
       walk.position.set(x0 + BLOCK / 2, 0.05, z0 + BLOCK / 2);
       walk.receiveShadow = true;
       scene.add(walk);
     }
+  }
+
+  // Grass and plaza plots: flat color patches that break up the bare ground.
+  for (const plot of state.city.plots) {
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(plot.w, plot.h),
+      new THREE.MeshLambertMaterial({ color: plot.kind === 'grass' ? 0x3f7a3a : 0x6a6f7d }),
+    );
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.set(plot.x, 0.04, plot.z);
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+  }
+
+  // Zebra crossings: one instanced mesh of white stripes, one crossing per
+  // intersection approach on each axis.
+  {
+    const stripeGeo = new THREE.BoxGeometry(1, 1, 1);
+    const stripeMat = new THREE.MeshBasicMaterial({ color: 0xd8d8d8 });
+    const spots = [];
+    for (const c of ROAD_COORDS) {
+      for (const c2 of ROAD_COORDS) {
+        for (let k = 0; k < 8; k += 1) {
+          spots.push({ x: c2 - 10, z: c - 5.25 + k * 1.5, sx: 2.8, sz: 0.8 });
+          spots.push({ x: c - 5.25 + k * 1.5, z: c2 - 10, sx: 0.8, sz: 2.8 });
+        }
+      }
+    }
+    const zebras = new THREE.InstancedMesh(stripeGeo, stripeMat, spots.length);
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const s = new THREE.Vector3();
+    const p = new THREE.Vector3();
+    spots.forEach((spot, i) => {
+      p.set(spot.x, 0.06, spot.z);
+      s.set(spot.sx, 0.02, spot.sz);
+      m.compose(p, q, s);
+      zebras.setMatrixAt(i, m);
+    });
+    scene.add(zebras);
+  }
+
+  // Street props: benches (seat + back), hydrants and bins, all instanced.
+  {
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const e = new THREE.Euler();
+    const s = new THREE.Vector3(1, 1, 1);
+    const p = new THREE.Vector3();
+    const benches = state.city.props.filter((pr) => pr.kind === 'bench');
+    const seatGeo = new THREE.BoxGeometry(1.8, 0.12, 0.55);
+    const backGeo = new THREE.BoxGeometry(1.8, 0.7, 0.1);
+    const woodMat = new THREE.MeshLambertMaterial({ color: 0x8a6a42 });
+    const seats = new THREE.InstancedMesh(seatGeo, woodMat, Math.max(1, benches.length));
+    const backs = new THREE.InstancedMesh(backGeo, woodMat, Math.max(1, benches.length));
+    benches.forEach((bench, i) => {
+      e.set(0, bench.rot, 0);
+      q.setFromEuler(e);
+      p.set(bench.x, 0.5, bench.z);
+      m.compose(p, q, s);
+      seats.setMatrixAt(i, m);
+      p.set(bench.x - Math.sin(bench.rot) * 0.25, 0.85, bench.z - Math.cos(bench.rot) * 0.25);
+      m.compose(p, q, s);
+      backs.setMatrixAt(i, m);
+    });
+    seats.count = benches.length;
+    backs.count = benches.length;
+    scene.add(seats);
+    scene.add(backs);
+    const hydrants = state.city.props.filter((pr) => pr.kind === 'hydrant');
+    const hydGeo = new THREE.CylinderGeometry(0.26, 0.3, 0.85, 8);
+    const hydMat = new THREE.MeshLambertMaterial({ color: 0xc22a2a });
+    const hyds = new THREE.InstancedMesh(hydGeo, hydMat, Math.max(1, hydrants.length));
+    hydrants.forEach((hyd, i) => {
+      e.set(0, 0, 0);
+      q.setFromEuler(e);
+      p.set(hyd.x, 0.45, hyd.z);
+      m.compose(p, q, s);
+      hyds.setMatrixAt(i, m);
+    });
+    hyds.count = hydrants.length;
+    scene.add(hyds);
+    const bins = state.city.props.filter((pr) => pr.kind === 'bin');
+    const binGeo = new THREE.CylinderGeometry(0.34, 0.3, 0.95, 8);
+    const binMat = new THREE.MeshLambertMaterial({ color: 0x2e4a34 });
+    const binMesh = new THREE.InstancedMesh(binGeo, binMat, Math.max(1, bins.length));
+    bins.forEach((bin, i) => {
+      e.set(0, 0, 0);
+      q.setFromEuler(e);
+      p.set(bin.x, 0.5, bin.z);
+      m.compose(p, q, s);
+      binMesh.setMatrixAt(i, m);
+    });
+    binMesh.count = bins.length;
+    scene.add(binMesh);
   }
 
   // Buildings: shared unit box, a few lit-window facades, scaled per building.
@@ -373,7 +521,10 @@ export function createCity(canvas, state, getMissionTarget) {
   // Vehicles and people.
   const carMeshes = new Map();
   function addCarMesh(car) {
-    const built = makeCarMesh(car.color, car.kind === 'police');
+    // Police keep the sedan silhouette; traffic gets a deterministic style
+    // from its id, so the street is not one box in eight colors.
+    const style = car.kind === 'police' ? 0 : Math.floor(hashInt(car.id * 13 + 5) * 3);
+    const built = makeCarMesh(car.color, car.kind === 'police', style);
     built.group.position.set(car.x, 0.05, car.z);
     built.group.rotation.y = car.heading;
     scene.add(built.group);
@@ -445,9 +596,10 @@ export function createCity(canvas, state, getMissionTarget) {
         camera.position.set(Math.sin(a) * 170, 48, Math.cos(a) * 170);
         camera.lookAt(0, 10, 0);
       } else {
-        // Chase framing behind the player or their car.
-        const back = p.onFoot ? 10 : 13;
-        const h = p.onFoot ? 4.4 : 5.6;
+        // Chase framing behind the player or their car. Round 3 pulls the
+        // camera in (13 m was so far the car read as a toy).
+        const back = p.onFoot ? 7.5 : 10;
+        const h = p.onFoot ? 4.0 : 4.8;
         const fx = Math.sin(p.heading);
         const fz = Math.cos(p.heading);
         camera.position.set(p.x - fx * back, h, p.z - fz * back);
@@ -469,8 +621,8 @@ export function createCity(canvas, state, getMissionTarget) {
     if (velSpeed > 0.5 && forwardDot > 0.5) {
       camYaw += diff * Math.min(1, dt * 2.2);
     }
-    const dist = p.onFoot ? 9.5 : 13;
-    const height = p.onFoot ? 4.2 : 5.5;
+    const dist = p.onFoot ? 7.5 : 9.5;
+    const height = p.onFoot ? 3.8 : 4.6;
     camDist += (dist - camDist) * Math.min(1, dt * 3);
     camHeight += (height - camHeight) * Math.min(1, dt * 3);
     const fx = Math.sin(camYaw);

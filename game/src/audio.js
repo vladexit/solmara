@@ -175,6 +175,33 @@ export function createAudio() {
     noise(t, 0.08, 0.4, 900);
     tone(t, 'sine', 110, 55, 0.12, 0.4);
   }
+  function crash() {
+    // A crunch: filtered noise burst plus a low thud. Used for building
+    // hits, roadblocks and ramming traffic.
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    noise(t, 0.18, 0.5, 500);
+    tone(t, 'sine', 90, 40, 0.22, 0.5);
+  }
+  function fail() {
+    // The clock ran out: two flat descending notes.
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    [57, 53].forEach((m, i) => tone(t + i * 0.18, 'triangle', midi(m), 0, 0.28, 0.22));
+  }
+  function horn() {
+    // A car horn: two detuned squares, short.
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    tone(t, 'square', 370, 0, 0.22, 0.12);
+    tone(t, 'square', 466, 0, 0.22, 0.12);
+  }
+  function win() {
+    // The Big Score fanfare: a rising major arpeggio, twice.
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    [72, 76, 79, 84, 79, 84, 88, 91].forEach((m, i) => tone(t + i * 0.11, 'triangle', midi(m), 0, 0.3, 0.25));
+  }
   function missionDone() {
     if (!ctx) return;
     const t = ctx.currentTime;
@@ -203,5 +230,5 @@ export function createAudio() {
     return muted;
   }
 
-  return { unlock, update, blip, punch, missionDone, busted, nextStation, stationName, toggleMute, isMuted };
+  return { unlock, update, blip, punch, crash, fail, horn, win, missionDone, busted, nextStation, stationName, toggleMute, isMuted };
 }

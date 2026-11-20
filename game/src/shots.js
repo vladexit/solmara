@@ -5,10 +5,10 @@
 // looks like and the same seed always gives the same frame.
 import { ROAD_COORDS, STEP } from './config.js';
 import { EVENT_BUSTED } from './world.js';
-import { SCREEN_BUSTED, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
+import { SCREEN_BUSTED, SCREEN_PLAY, SCREEN_TITLE, SCREEN_WON } from './render.js';
 
 const START_SECONDS = 6;
-const PLAY_SECONDS = 26;
+const PLAY_SECONDS = 34;
 const BUSTED_LIMIT_SECONDS = 40;
 
 function clampAngle(a) {
@@ -91,6 +91,33 @@ function autopilot(world, reverseTimer) {
 export function stageShot(name, world) {
   world.reset();
   const reverseTimer = { value: 0, stuck: 0 };
+  if (name === 'win') {
+    // Stage the victory: walk the mission chain to the end, teleporting
+    // between points with the ram quota filled, so the win screen is what
+    // a real completed run shows.
+    const p = world.state.player;
+    for (let guard = 0; guard < 64 && !world.state.won; guard += 1) {
+      const target = world.missionTarget();
+      const m = world.currentMission();
+      if (m.needCar && p.onFoot) {
+        const car = world.state.cars.find((c) => c.kind === 'parked');
+        if (!car) break;
+        car.kind = 'player';
+        p.onFoot = false;
+        p.carId = car.id;
+      }
+      if (target.ram) world.state.missionRams = target.ram;
+      const car = world.state.cars.find((c) => c.id === p.carId);
+      p.x = target.x;
+      p.z = target.z;
+      if (car) {
+        car.x = target.x;
+        car.z = target.z;
+      }
+      world.step(STEP, { x: 0, y: 0, run: false, enter: false, punch: false, dance: false }, false);
+    }
+    return { screen: SCREEN_WON };
+  }
   if (name !== 'play' && name !== 'chase' && name !== 'busted') {
     for (let i = 0; i < START_SECONDS / STEP; i += 1) {
       world.step(STEP, { x: 0, y: 0, run: false, enter: false, punch: false, dance: false }, true);
@@ -109,6 +136,15 @@ export function stageShot(name, world) {
   for (let i = 0; i < limit / STEP; i += 1) {
     const events = world.step(STEP, autopilot(world, reverseTimer), false);
     if (events & EVENT_BUSTED) break;
+  }
+  if (name === 'play') {
+    // Round 3: the play frame should show the busy city, not an empty road —
+    // the longer drive already reaches Neon Row, and one star of heat puts
+    // a cruiser in the frame behind the player.
+    world.state.wanted = Math.max(world.state.wanted, 1);
+    for (let i = 0; i < 2 / STEP; i += 1) {
+      world.step(STEP, autopilot(world, reverseTimer), false);
+    }
   }
   if (name === 'busted' && !world.state.busted) {
     // The chase does not always end in an arrest in time: stage the bust itself
